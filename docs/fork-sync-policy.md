@@ -43,12 +43,50 @@ tested `captureRelay` in `editor_mew.go`, matched nothing here, and sat in the
 upstream repo referring to a symbol that does not exist there until it was
 noticed and renamed.
 
+The rule runs both ways: **an upstream-owned file must not be named to match
+the glob either**, or a sync will quietly refuse to carry it. That is why the
+assertion below is `editor_tag_assert.go` and not `editor_mew_required.go`,
+which was its first name.
+
 These carry `//go:build mew` and import `github.com/phroun/mew`. Upstream ships
 the complementary `//go:build !mew` placeholders (`editor.go`,
 `editor_protocol.go`) instead. You already exclude these correctly with
 `--exclude` — keep doing that. **Changes to the `!mew` placeholders are fine
 to send** (they import nothing from mew and keep the two sides of the contract
 in step).
+
+### The one symbol mew must keep declaring
+
+Upstream carries `objects/trinkets/editor_tag_assert.go`, a `//go:build mew`
+file whose whole body is:
+
+```go
+var _ = mewEditorSuppliedByTheMewDistribution
+```
+
+Nothing upstream declares that constant, so **building the mew-free tree with
+`-tags mew` fails**, naming what is missing. That is the point: the tag selects
+an editor that lives in your tree, and without this the tag built cleanly here
+and produced a host with no `editor` type registered at all — 33 types instead
+of 34, with nothing reported until a client's `new editor` came back "unknown
+trinket type".
+
+Your side satisfies it. `editor_mew.go` declares:
+
+```go
+const mewEditorSuppliedByTheMewDistribution = true
+```
+
+So: **keep that constant declared in a mew-owned file for as long as you carry
+a mew-backed editor.** If you ever rename or retire `editor_mew.go`, move the
+declaration rather than dropping it — losing it breaks your own `-tags mew`
+build, which is the failure it exists to cause upstream.
+
+It is a compile-time constant referenced once, so it reaches neither binary,
+and it needs no module dependency — which is what lets upstream assert it
+without `mew` entering the graph (§4's invariant).
+
+`editor_tag_assert.go` is **upstream-owned**. Do not send changes to it.
 
 ### Junk that must never be in a diff at all
 
