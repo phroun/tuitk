@@ -44,15 +44,41 @@ type eventViewer struct {
 func (v *eventViewer) build() core.Trinket {
 	v.tree = NewTreeView()
 	v.tree.SetShowHeader(true)
-	v.tree.SetKeyCaption("#")
 	v.tree.SetLedger(true) // alternating row tint: long runs stay readable
+
+	// The sequence is a DATA column, and the key (tree) column is hidden.
+	//
+	// It began as the key column, which is the natural home for a row's
+	// label - but the key column is not a TreeColumn, so it has nowhere to
+	// carry Numeric and sorts as text: 1, 10, 11, 2. It cannot carry a
+	// SortProxy either, for the same reason. As an ordinary column it just
+	// declares Numeric and sorts correctly, with no toolkit change at all.
+	//
+	// The log is flat, so nothing is lost by hiding the tree column: there
+	// is no hierarchy for it to express.
+	v.tree.SetShowKey(false)
+
+	// Natural widths and horizontal panning rather than fit mode. The columns
+	// want more room than the window has, and squeezing them to the width is
+	// the wrong trade here: a cell that has been narrowed to nothing renders
+	// as an ellipsis, and "the field held something I cannot read" is the one
+	// answer this viewer must never give.
+	v.tree.SetFitWidth(false)
+
+	// Optional puts a column in the [=] chooser. All of them, because which
+	// ones are noise depends entirely on what is being chased -- Modifiers and
+	// Repeat are the whole question for a keyboard problem and pure clutter
+	// for a mouse one. The # column is not a data column and always remains,
+	// so the tree cannot be emptied.
 	for _, c := range []*TreeColumn{
-		{ID: "event", Caption: "Event", Width: 14, Resizable: true},
-		{ID: "key", Caption: "Key", Width: 16, Resizable: true},
-		{ID: "mods", Caption: "Modifiers", Width: 22, Resizable: true},
-		{ID: "repeat", Caption: "Repeat", Width: 7, Align: "center"},
-		{ID: "text", Caption: "Text", Width: 8, Resizable: true},
-		{ID: "detail", Caption: "Detail", Width: 40, Resizable: true},
+		{ID: "seq", Caption: "#", Width: 7, Align: "right", Optional: true,
+			Sortable: true, Numeric: true},
+		{ID: "event", Caption: "Event", Width: 14, Resizable: true, Optional: true},
+		{ID: "key", Caption: "Key", Width: 16, Resizable: true, Optional: true},
+		{ID: "mods", Caption: "Modifiers", Width: 22, Resizable: true, Optional: true},
+		{ID: "repeat", Caption: "Repeat", Width: 7, Align: "center", Optional: true},
+		{ID: "text", Caption: "Text", Width: 8, Resizable: true, Optional: true},
+		{ID: "detail", Caption: "Detail", Width: 40, Resizable: true, Optional: true},
 	} {
 		v.tree.AddColumn(c)
 	}
@@ -157,7 +183,12 @@ func (v *eventViewer) log(ev core.Event) {
 	}
 
 	v.seq++
-	item := NewTreeItem(fmt.Sprintf("%d", v.seq))
+	// The number goes in the seq COLUMN, where it can sort numerically. It
+	// stays on the item's text too: the key column is hidden, but Text is
+	// what an item announces itself as to accessibility.
+	seq := fmt.Sprintf("%d", v.seq)
+	item := NewTreeItem(seq)
+	item.SetValue("seq", seq)
 	item.SetValue("event", name)
 	item.SetValue("key", key)
 	item.SetValue("mods", mods)

@@ -117,6 +117,96 @@ func TestEventViewerOpensOnceAndLogs(t *testing.T) {
 	}
 }
 
+// The log pans horizontally rather than squeezing, and every data column can
+// be hidden from the [=] chooser.
+//
+// Both are about the same thing: the columns want more room than the window
+// has. Fit mode would answer that by narrowing cells until they ellipsize,
+// and "the field held something I cannot read" is the one answer a viewer
+// that exists to report exactly what arrived must never give.
+func TestEventViewerColumnsPanAndAreChoosable(t *testing.T) {
+	d := NewDesktop()
+	d.windowManager = window.NewWindowManager()
+	eventViewerItem(t, d).OnTriggered()
+
+	tree := d.eventViewer.tree
+	if tree.fitWidth {
+		t.Error("fit mode is on, so the log squeezes instead of panning")
+	}
+
+	// Natural widths have to exceed a plausible window, or panning is moot.
+	natural := 0
+	for _, c := range tree.Columns() {
+		natural += c.Width
+	}
+	if natural <= 80 {
+		t.Errorf("columns total %d cells; that fits, so nothing pans", natural)
+	}
+
+	// Every data column is in the chooser. The [=] button only appears when
+	// at least one is, so this is also what makes it reachable at all.
+	for _, c := range tree.Columns() {
+		if !c.Optional {
+			t.Errorf("column %q is not in the chooser and can never be hidden", c.ID)
+		}
+		if c.Hidden {
+			t.Errorf("column %q starts hidden", c.ID)
+		}
+	}
+	if _, ok := tree.chooserButtonRect(); !ok {
+		t.Error("no [=] chooser button in the header")
+	}
+}
+
+// The sequence is a data column rather than the key column, so it can declare
+// Numeric and sort as a number. The key column cannot: it is not a TreeColumn,
+// so it has nowhere to carry the flag (nor a SortProxy), and would order the
+// log 1, 10, 11, 2.
+func TestEventViewerSequenceSortsNumerically(t *testing.T) {
+	d := NewDesktop()
+	d.windowManager = window.NewWindowManager()
+	eventViewerItem(t, d).OnTriggered()
+
+	v := d.eventViewer
+	tree := v.tree
+	if tree.showKey {
+		t.Error("the key column is shown; the log is flat and has no hierarchy for it")
+	}
+
+	var seq *TreeColumn
+	for _, c := range tree.Columns() {
+		if c.ID == "seq" {
+			seq = c
+		}
+	}
+	if seq == nil {
+		t.Fatal("no seq column")
+	}
+	if !seq.Numeric {
+		t.Error("seq is not numeric, so it sorts 1, 10, 11, 2")
+	}
+	if !seq.Sortable {
+		t.Error("seq is not sortable, so the numeric flag never applies")
+	}
+
+	// Twelve rows, so a text sort would put 10, 11, 12 between 1 and 2.
+	for i := 0; i < 12; i++ {
+		v.log(core.KeyPressEvent{Key: "a", Text: "a"})
+	}
+	tree.SetSorted(true, tree.columnIndex(seq), false)
+
+	var got []string
+	for _, it := range tree.visualSiblings(tree.RootItems()) {
+		got = append(got, it.Value("seq"))
+	}
+	want := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sorted ascending as %v, want %v", got, want)
+		}
+	}
+}
+
 // The viewer is opened OVER the program being watched, so a window that
 // covers the desktop defeats the point. Its preferred size is what the tree's
 // columns want, which is wider than most desktops - the cap is what decides
