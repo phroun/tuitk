@@ -68,8 +68,8 @@ func (v *eventViewer) build() core.Trinket {
 	// Optional puts a column in the [=] chooser. All of them, because which
 	// ones are noise depends entirely on what is being chased -- Modifiers and
 	// Repeat are the whole question for a keyboard problem and pure clutter
-	// for a mouse one. The # column is not a data column and always remains,
-	// so the tree cannot be emptied.
+	// for a mouse one. Hiding every one of them does not leave a blank tree:
+	// with no visible data column the key column comes back, hidden or not.
 	for _, c := range []*TreeColumn{
 		{ID: "seq", Caption: "#", Width: 7, Align: "right", Optional: true,
 			Sortable: true, Numeric: true},
@@ -99,7 +99,14 @@ func (v *eventViewer) build() core.Trinket {
 
 	controls := NewPanel()
 	controlsLayout := layout.NewBoxLayout(core.Horizontal)
-	controlsLayout.SetSpacing(2)
+	// No explicit spacing, and the gaps are not missing: a checkbox, a button
+	// and a label are all core.InlineTrinket - text-style controls - and a box
+	// layout already parts those by one cell so they do not butt together.
+	//
+	// Asking for spacing on top of that was worse than redundant. It is
+	// expressed in UNITS, and anything under a cell rounds away to nothing in
+	// Layout while SizeHint still counts it in full, so the panel asked for a
+	// width the layout never used - and not a whole number of cells either.
 	controls.SetLayoutManager(controlsLayout)
 	controls.AddChild(mouse)
 	controls.AddChild(clear)
@@ -117,7 +124,6 @@ func (v *eventViewer) build() core.Trinket {
 
 	rootPanel := NewPanel()
 	rootLayout := layout.NewBoxLayout(core.Vertical)
-	rootLayout.SetSpacing(1)
 	rootPanel.SetLayoutManager(rootLayout)
 	rootPanel.AddChild(v.tree)
 	rootPanel.AddChild(controls)

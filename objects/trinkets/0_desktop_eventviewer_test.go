@@ -10,6 +10,7 @@ package trinkets
 // it.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -323,4 +324,42 @@ func TestEventViewerStopsLoggingWhenClosed(t *testing.T) {
 	if got := len(first.tree.RootItems()); got != before {
 		t.Errorf("the closed viewer logged again: %d rows", got)
 	}
+}
+
+// The whole content tree, not just the window frame.
+//
+// A cell surface draws through UnitsToCellX/Y, which integer-divides, so an
+// off-grid trinket is DRAWN snapped while Contains still hit-tests it at its
+// raw bounds. The two then disagree by up to a cell, and a click near the
+// boundary resolves to the wrong trinket. Nothing enforces the rule (see the
+// task on that), so this pins the viewer's own tree.
+func TestEventViewerTreeIsCellAligned(t *testing.T) {
+	d := NewDesktop()
+	d.SetBounds(core.UnitRect{Width: 1000, Height: 700})
+	d.windowManager = window.NewWindowManager()
+	d.windowManager.SetDesktop(d)
+	m := d.EffectiveCellMetrics()
+
+	eventViewerItem(t, d).OnTriggered()
+	win := d.windowManager.Windows()[0]
+	win.SetBounds(win.Bounds()) // settle the layout
+
+	var walk func(tr core.Trinket, path string)
+	walk = func(tr core.Trinket, path string) {
+		if tr == nil {
+			return
+		}
+		b := tr.Bounds()
+		if b.X%m.CellWidth != 0 || b.Y%m.CellHeight != 0 ||
+			b.Width%m.CellWidth != 0 || b.Height%m.CellHeight != 0 {
+			t.Errorf("%s (%T) is off the %dx%d cell grid at %+v",
+				path, tr, m.CellWidth, m.CellHeight, b)
+		}
+		if ct, ok := tr.(core.Container); ok {
+			for i, c := range ct.Children() {
+				walk(c, fmt.Sprintf("%s/%d", path, i))
+			}
+		}
+	}
+	walk(win.Content(), "content")
 }
