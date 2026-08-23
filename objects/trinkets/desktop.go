@@ -516,7 +516,18 @@ func (d *Desktop) createSystemMenu() *Menu {
 		d.showAboutDesktop()
 	}))
 	menu.AddItem(NewSeparator())
-	menu.AddItem(NewMenuItem("Desktop &Accessories").SetSubMenu(d.createAccessoriesMenu()))
+
+	// Desktop Accessories: the small tools that belong to the desktop rather
+	// than to any application, and so are reachable whatever is running.
+	//
+	// The disabled item is a HEADING, not a broken command - the accessories
+	// are the enabled items under it. A submenu is where this belongs and it
+	// was tried, but submenus are not dependable enough yet to hang the only
+	// route to a tool off one; the flat list goes back when they are.
+	menu.AddItem(NewMenuItem("Desktop &Accessories").SetEnabled(false))
+	menu.AddItem(NewMenuItem("&Event Viewer").SetOnTriggered(func() {
+		d.showEventViewer()
+	}))
 	menu.AddItem(NewSeparator())
 
 	// Exit Desktop. The item names what it MEANS; which key that is, and
@@ -528,17 +539,6 @@ func (d *Desktop) createSystemMenu() *Menu {
 	})
 	menu.AddItem(exitItem)
 
-	return menu
-}
-
-// createAccessoriesMenu builds the Desktop Accessories submenu of the system
-// (Ψ) menu: the small tools that belong to the desktop rather than to any
-// application, and so are reachable whatever is running.
-func (d *Desktop) createAccessoriesMenu() *Menu {
-	menu := NewMenu("Desktop Accessories")
-	menu.AddItem(NewMenuItem("&Event Viewer").SetOnTriggered(func() {
-		d.showEventViewer()
-	}))
 	return menu
 }
 

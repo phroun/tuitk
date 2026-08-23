@@ -17,40 +17,54 @@ import (
 	"github.com/phroun/kittytk/objects/window"
 )
 
-// accessoriesItem finds the Desktop Accessories item and its submenu.
-func accessoriesItem(t *testing.T, d *Desktop) *MenuItem {
+// eventViewerItem finds the Event Viewer item in the system menu.
+func eventViewerItem(t *testing.T, d *Desktop) *MenuItem {
 	t.Helper()
 	for _, it := range d.systemMenu.Items() {
-		if strings.Contains(it.Text, "Desktop Accessories") {
+		if strings.Contains(it.Text, "Event Viewer") {
 			return it
 		}
 	}
-	t.Fatal("Desktop Accessories item not found in the system menu")
+	t.Fatal("Event Viewer not found in the system menu")
 	return nil
 }
 
-func TestDesktopAccessoriesIsASubMenu(t *testing.T) {
+// The accessories are a flat run under a disabled heading rather than a
+// submenu. The heading must stay disabled - an enabled one would look like a
+// command that does nothing - and the accessories under it must NOT be, which
+// is the pairing this checks.
+func TestDesktopAccessoriesHeadingAndItems(t *testing.T) {
 	d := NewDesktop()
-	it := accessoriesItem(t, d)
 
-	// It used to be a disabled placeholder; it is now a real submenu, which
-	// means it must be enabled or the submenu can never be opened.
-	if !it.Enabled {
-		t.Error("Desktop Accessories is disabled, so its submenu is unreachable")
-	}
-	if it.SubMenu == nil {
-		t.Fatal("Desktop Accessories has no submenu")
-	}
-	var viewer *MenuItem
-	for _, sub := range it.SubMenu.Items() {
-		if strings.Contains(sub.Text, "Event Viewer") {
-			viewer = sub
+	items := d.systemMenu.Items()
+	heading := -1
+	for i, it := range items {
+		if strings.Contains(it.Text, "Desktop Accessories") {
+			heading = i
 		}
 	}
-	if viewer == nil {
-		t.Fatal("Event Viewer not found under Desktop Accessories")
+	if heading < 0 {
+		t.Fatal("Desktop Accessories heading not found in the system menu")
 	}
-	if viewer.OnTriggered == nil {
+	if items[heading].Enabled {
+		t.Error("the Desktop Accessories heading is enabled; it would read as a command")
+	}
+	if items[heading].SubMenu != nil {
+		t.Error("the heading carries a submenu; the accessories are meant to be flat")
+	}
+
+	// The first accessory sits directly below the heading.
+	if heading+1 >= len(items) {
+		t.Fatal("nothing follows the Desktop Accessories heading")
+	}
+	first := items[heading+1]
+	if !strings.Contains(first.Text, "Event Viewer") {
+		t.Errorf("item below the heading is %q, want Event Viewer", first.Text)
+	}
+	if !first.Enabled {
+		t.Error("Event Viewer is disabled")
+	}
+	if first.OnTriggered == nil {
 		t.Error("Event Viewer item is not wired")
 	}
 }
@@ -59,12 +73,7 @@ func TestEventViewerOpensOnceAndLogs(t *testing.T) {
 	d := NewDesktop()
 	d.windowManager = window.NewWindowManager()
 
-	var viewer *MenuItem
-	for _, sub := range accessoriesItem(t, d).SubMenu.Items() {
-		if strings.Contains(sub.Text, "Event Viewer") {
-			viewer = sub
-		}
-	}
+	viewer := eventViewerItem(t, d)
 
 	viewer.OnTriggered()
 	wins := d.windowManager.Windows()
@@ -112,12 +121,7 @@ func TestEventViewerStopsLoggingWhenClosed(t *testing.T) {
 	d := NewDesktop()
 	d.windowManager = window.NewWindowManager()
 
-	var viewer *MenuItem
-	for _, sub := range accessoriesItem(t, d).SubMenu.Items() {
-		if strings.Contains(sub.Text, "Event Viewer") {
-			viewer = sub
-		}
-	}
+	viewer := eventViewerItem(t, d)
 	viewer.OnTriggered()
 	first := d.eventViewer
 	win := first.win
