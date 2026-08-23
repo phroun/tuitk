@@ -12,7 +12,7 @@
 // Provisional syntax details pending O6 (marked in the plan):
 // '#' starts a comment running to end of line; string escapes are
 // \\ \" \n \t \r.
-package protocol
+package wire
 
 import (
 	"fmt"
