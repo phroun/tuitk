@@ -117,6 +117,42 @@ func TestEventViewerOpensOnceAndLogs(t *testing.T) {
 	}
 }
 
+// The viewer is opened OVER the program being watched, so a window that
+// covers the desktop defeats the point. Its preferred size is what the tree's
+// columns want, which is wider than most desktops - the cap is what decides
+// the size in practice, and it is the part worth pinning.
+func TestEventViewerFitsInsideTheDesktop(t *testing.T) {
+	for _, size := range []core.UnitSize{
+		{Width: 400, Height: 300},   // smaller than the preferred size
+		{Width: 4000, Height: 3000}, // larger than it
+	} {
+		d := NewDesktop()
+		d.SetBounds(core.UnitRect{Width: size.Width, Height: size.Height})
+		d.windowManager = window.NewWindowManager()
+		d.windowManager.SetDesktop(d)
+
+		area := d.windowManager.ClientArea()
+		if area.Width <= 0 || area.Height <= 0 {
+			t.Fatalf("client area is %dx%d; the cap would not be exercised",
+				area.Width, area.Height)
+		}
+
+		eventViewerItem(t, d).OnTriggered()
+
+		b := d.windowManager.Windows()[0].Bounds()
+		if b.Width > area.Width || b.Height > area.Height {
+			t.Errorf("in a %dx%d client area the viewer is %dx%d",
+				area.Width, area.Height, b.Width, b.Height)
+		}
+		// And it stays on screen rather than being centred off the edge.
+		if b.X < area.X || b.Y < area.Y ||
+			b.X+b.Width > area.X+area.Width || b.Y+b.Height > area.Y+area.Height {
+			t.Errorf("in a %dx%d client area the viewer sits at %d,%d %dx%d",
+				area.Width, area.Height, b.X, b.Y, b.Width, b.Height)
+		}
+	}
+}
+
 func TestEventViewerStopsLoggingWhenClosed(t *testing.T) {
 	d := NewDesktop()
 	d.windowManager = window.NewWindowManager()

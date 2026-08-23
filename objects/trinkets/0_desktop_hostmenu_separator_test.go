@@ -1,12 +1,14 @@
 package trinkets
 
-// addHostWindowMenuItems puts Minimize and Zoom above Exit Desktop, preceded
-// by a separator dividing them from the group above.
+// addHostWindowMenuItems puts Minimize and Zoom above Exit Desktop as a group
+// of their own, which means dividing them from the group above AND from Exit
+// below - but only where a rule is actually missing.
 //
-// That separator is only warranted when there is a group above to divide from.
-// createSystemMenu already closes its last group with a rule, so inserting one
-// unconditionally drew two in a row; and if Exit were ever first in the menu
-// it would open the menu with a rule above everything.
+// Both edges have their own way of going wrong. Above: createSystemMenu
+// already closes its last group with a rule, so inserting one unconditionally
+// draws two in a row, and with Exit first in the menu it opens the menu with a
+// rule above everything. Below: the rule the menu already carries gets used up
+// above these items, so Exit is left joined onto Zoom with nothing between.
 
 import (
 	"testing"
@@ -60,38 +62,45 @@ func equalShape(a, b []string) bool {
 	return true
 }
 
-func TestHostWindowMenuItemsSeparatorNeedsAGroupAbove(t *testing.T) {
+func TestHostWindowMenuItemsDivideTheGroupOnBothSides(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		items []*MenuItem
 		want  []string
 	}{
 		{
-			// The previous group is already closed by its own rule, so
-			// these items just join on below it.
+			// The group above is already closed by its own rule, so these
+			// items join on below it - and Exit still needs dividing.
 			name:  "a rule already closes the group above",
 			items: []*MenuItem{NewMenuItem("About"), NewSeparator(), exitItem()},
-			want:  []string{"About", "---", "Minimize", "Zoom", "Exit Desktop"},
+			want:  []string{"About", "---", "Minimize", "Zoom", "---", "Exit Desktop"},
 		},
 		{
-			// A live item directly above IS a group to divide from, so the
-			// separator is the whole point and must appear.
+			// A live item directly above IS a group to divide from, so a
+			// rule is wanted on both sides.
 			name:  "a live item sits directly above",
 			items: []*MenuItem{NewMenuItem("About"), exitItem()},
-			want:  []string{"About", "---", "Minimize", "Zoom", "Exit Desktop"},
+			want:  []string{"About", "---", "Minimize", "Zoom", "---", "Exit Desktop"},
 		},
 		{
-			// Nothing above at all: no group, so no rule. One here would
+			// Nothing above at all: no group, so no rule there. One would
 			// open the menu with a divider above everything.
 			name:  "Exit is the first item",
 			items: []*MenuItem{exitItem()},
-			want:  []string{"Minimize", "Zoom", "Exit Desktop"},
+			want:  []string{"Minimize", "Zoom", "---", "Exit Desktop"},
 		},
 		{
-			// No Exit item: the insert falls to the end, and the rule is
-			// still judged by what it would land under.
+			// No Exit item: the insert falls to the end, so there is
+			// nothing below to divide from.
 			name:  "no Exit item to anchor to",
 			items: []*MenuItem{NewMenuItem("About")},
+			want:  []string{"About", "---", "Minimize", "Zoom"},
+		},
+		{
+			// Same, onto a menu that already ends in a rule: neither edge
+			// wants one.
+			name:  "no Exit item, menu already ends in a rule",
+			items: []*MenuItem{NewMenuItem("About"), NewSeparator()},
 			want:  []string{"About", "---", "Minimize", "Zoom"},
 		},
 	} {
@@ -121,6 +130,7 @@ func TestHostWindowMenuItemsOnTheRealSystemMenu(t *testing.T) {
 		"---",
 		"Minimize",
 		"Zoom",
+		"---",
 		"Exit Desktop",
 	}
 	if got := menuShape(d.systemMenu); !equalShape(got, want) {

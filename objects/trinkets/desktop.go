@@ -630,14 +630,28 @@ func (d *Desktop) showEventViewer() {
 
 	// A size to exist at before it is laid out: a window that starts at zero
 	// has nothing to measure the tree's columns against on the first frame.
+	//
+	// The preferred width is what the columns want (they total 107 cells, so
+	// this already scrolls) - but this is a tool opened OVER the program being
+	// watched, and one that covers the desktop is no use for watching
+	// anything. So it is capped at three quarters of the client area on each
+	// axis, which on a small desktop is what actually decides the size.
 	metrics := d.EffectiveCellMetrics()
-	win.SetBounds(core.UnitRect{
-		Width:  metrics.CellWidth * 96,
-		Height: metrics.CellHeight * 24,
-	})
+	area := wm.ClientArea()
+	w := metrics.CellWidth * 96
+	h := metrics.CellHeight * 24
+	// Each axis capped only when the desktop's size on it is actually known -
+	// a client area not established yet reads as zero, and capping to that
+	// would open the viewer with no size at all.
+	if area.Width > 0 {
+		w = min(w, area.Width*3/4)
+	}
+	if area.Height > 0 {
+		h = min(h, area.Height*3/4)
+	}
+	win.SetBounds(core.UnitRect{Width: w, Height: h})
 	wm.AddWindow(win)
 
-	area := wm.ClientArea()
 	b := win.Bounds()
 	x := area.X + (area.Width-b.Width)/2
 	y := area.Y + (area.Height-b.Height)/2
