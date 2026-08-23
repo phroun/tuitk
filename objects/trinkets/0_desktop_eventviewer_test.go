@@ -243,6 +243,49 @@ func TestEventViewerFitsInsideTheDesktop(t *testing.T) {
 	}
 }
 
+// On a cell surface a window must sit on the grid AND be a whole number of
+// cells across. The cap above is arithmetic on the client area and knows
+// nothing about the cell size, so the sizes are the half that goes wrong -
+// the origin is snapped explicitly and looks right while the extents do not.
+func TestEventViewerIsCellAligned(t *testing.T) {
+	// Sizes chosen so three quarters of the resulting client area is NOT a
+	// whole number of cells on at least one axis.
+	for _, size := range []core.UnitSize{
+		{Width: 640, Height: 400},
+		{Width: 1000, Height: 700},
+		{Width: 1234, Height: 567},
+	} {
+		d := NewDesktop()
+		d.SetBounds(core.UnitRect{Width: size.Width, Height: size.Height})
+		d.windowManager = window.NewWindowManager()
+		d.windowManager.SetDesktop(d)
+		if d.windowManager.SmoothPositioning() {
+			t.Fatal("this manager positions smoothly; the grid rule would not apply")
+		}
+		m := d.EffectiveCellMetrics()
+
+		eventViewerItem(t, d).OnTriggered()
+
+		b := d.windowManager.Windows()[0].Bounds()
+		for _, c := range []struct {
+			name string
+			v    core.Unit
+			cell core.Unit
+		}{
+			{"width", b.Width, m.CellWidth},
+			{"height", b.Height, m.CellHeight},
+			{"x", b.X, m.CellWidth},
+			{"y", b.Y, m.CellHeight},
+		} {
+			if c.v%c.cell != 0 {
+				t.Errorf("on a %dx%d desktop the viewer's %s is %d, which is %d "+
+					"past a %d-unit cell boundary",
+					size.Width, size.Height, c.name, c.v, c.v%c.cell, c.cell)
+			}
+		}
+	}
+}
+
 func TestEventViewerStopsLoggingWhenClosed(t *testing.T) {
 	d := NewDesktop()
 	d.windowManager = window.NewWindowManager()

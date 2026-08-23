@@ -649,6 +649,14 @@ func (d *Desktop) showEventViewer() {
 	if area.Height > 0 {
 		h = min(h, area.Height*3/4)
 	}
+	// The cap is arithmetic on the client area and knows nothing about the
+	// cell size, so on a cell surface it lands mid-cell. Snap the extents the
+	// same way the origin is snapped below: on that surface a window must sit
+	// on the grid AND be a whole number of cells across.
+	if !wm.SmoothPositioning() {
+		aligned := metrics.AlignSize(core.UnitSize{Width: w, Height: h})
+		w, h = aligned.Width, aligned.Height
+	}
 	win.SetBounds(core.UnitRect{Width: w, Height: h})
 	wm.AddWindow(win)
 
