@@ -1,4 +1,4 @@
-package protocol
+package wire
 
 import (
 	"bufio"
@@ -13,6 +13,15 @@ import (
 // on the wire - replies, errors - and the incremental scanner that
 // frames statements out of a byte stream using the language's own
 // brace/string awareness.
+
+// Reply reports server-assigned IDs for a request: top-level
+// correlation keys plus explicitly surfaced names (D11/D15). Extra
+// carries additional raw wire statements a verb wants delivered ahead
+// of the reply line (the describe verb's flat vocabulary stream, D24).
+type Reply struct {
+	IDs   map[string]uint64
+	Extra []string
+}
 
 // EncodeReply renders a Reply as a wire statement:
 //
