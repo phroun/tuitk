@@ -478,18 +478,17 @@ func (d *Desktop) addHostWindowMenuItems() {
 			break
 		}
 	}
-	// ...but only bring a separator if there is not one there already. This
-	// writes into a menu it does not own, and createSystemMenu already closes
-	// its last group with one, so inserting unconditionally drew two rules in
-	// a row above Minimize.
-	if at > 0 && items[at-1] != nil && items[at-1].Separator {
-		d.systemMenu.InsertItem(at, minItem)
-		d.systemMenu.InsertItem(at+1, zoomItem)
-		return
+	// The separator divides these two items from the group above them, so it
+	// is warranted only when there IS a group above: a real item sitting at
+	// at-1. A rule there means the previous group is already closed, and
+	// nothing there means there is no previous group at all. Bringing one
+	// anyway drew a second rule under createSystemMenu's own.
+	if at > 0 && items[at-1] != nil && !items[at-1].Separator {
+		d.systemMenu.InsertItem(at, NewSeparator())
+		at++
 	}
-	d.systemMenu.InsertItem(at, NewSeparator())
-	d.systemMenu.InsertItem(at+1, minItem)
-	d.systemMenu.InsertItem(at+2, zoomItem)
+	d.systemMenu.InsertItem(at, minItem)
+	d.systemMenu.InsertItem(at+1, zoomItem)
 }
 
 // hostMinimize miniaturizes the desktop's OS window (the Ψ menu item).
