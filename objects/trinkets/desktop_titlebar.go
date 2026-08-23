@@ -478,6 +478,15 @@ func (d *Desktop) addHostWindowMenuItems() {
 			break
 		}
 	}
+	// ...but only bring a separator if there is not one there already. This
+	// writes into a menu it does not own, and createSystemMenu already closes
+	// its last group with one, so inserting unconditionally drew two rules in
+	// a row above Minimize.
+	if at > 0 && items[at-1] != nil && items[at-1].Separator {
+		d.systemMenu.InsertItem(at, minItem)
+		d.systemMenu.InsertItem(at+1, zoomItem)
+		return
+	}
 	d.systemMenu.InsertItem(at, NewSeparator())
 	d.systemMenu.InsertItem(at+1, minItem)
 	d.systemMenu.InsertItem(at+2, zoomItem)
