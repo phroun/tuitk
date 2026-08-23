@@ -1,4 +1,10 @@
-package main
+package trinkets
+
+// How the Event Viewer renders an event into a row.
+//
+// These came from examples/keytest, which was a whole host built to install a
+// desktop event filter. The accessory does that from inside any host now, so
+// the program is gone and its tests moved here with the code they cover.
 
 import (
 	"testing"
@@ -11,7 +17,7 @@ import (
 // same thing for two different events would hide exactly what this exists to
 // find.
 func TestDescribeRendersTheDistinctionsThatMatter(t *testing.T) {
-	press, key, mods, repeat, text, _, isMouse := describe(core.KeyPressEvent{
+	press, key, mods, repeat, text, _, isMouse := describeEvent(core.KeyPressEvent{
 		Key: "A", Text: "A", Modifiers: core.ShiftModifier,
 	})
 	if press != "KeyPress" || key != `"A"` || mods != "Shift" || text != `"A"` {
@@ -26,14 +32,14 @@ func TestDescribeRendersTheDistinctionsThatMatter(t *testing.T) {
 
 	// A held key and a struck one must not render alike — that difference is
 	// what the repeat column is for.
-	_, _, _, heldRepeat, _, _, _ := describe(core.KeyPressEvent{Key: "A", Repeat: true})
+	_, _, _, heldRepeat, _, _, _ := describeEvent(core.KeyPressEvent{Key: "A", Repeat: true})
 	if heldRepeat == repeat {
 		t.Errorf("held and struck both rendered repeat %q", heldRepeat)
 	}
 
 	// A release carries neither text nor a repeat flag, and saying so beats
 	// leaving the cells blank, which reads as "not filled in".
-	rel, relKey, relMods, relRepeat, relText, _, _ := describe(core.KeyReleaseEvent{
+	rel, relKey, relMods, relRepeat, relText, _, _ := describeEvent(core.KeyReleaseEvent{
 		Key: "Up", Modifiers: core.ControlModifier | core.ShiftModifier,
 	})
 	if rel != "KeyRelease" || relKey != `"Up"` || relMods != "Ctrl+Shift" {
@@ -48,11 +54,11 @@ func TestDescribeRendersTheDistinctionsThatMatter(t *testing.T) {
 // apart is regularly the whole question — an unnamed key release looked
 // identical to a key named "" until this distinction existed.
 func TestEmptyFieldsAreVisible(t *testing.T) {
-	_, key, _, _, text, _, _ := describe(core.KeyPressEvent{Key: "", Text: ""})
+	_, key, _, _, text, _, _ := describeEvent(core.KeyPressEvent{Key: "", Text: ""})
 	if key != "-" || text != "-" {
 		t.Errorf("empty key/text rendered as %q/%q, want %q", key, text, "-")
 	}
-	_, keyed, _, _, _, _, _ := describe(core.KeyPressEvent{Key: `"`})
+	_, keyed, _, _, _, _, _ := describeEvent(core.KeyPressEvent{Key: `"`})
 	if keyed != `"\""` {
 		t.Errorf("a quote character rendered as %s; it must stay distinguishable "+
 			"from the quoting itself", keyed)
@@ -70,7 +76,7 @@ func TestOnlyMouseEventsAreFilterable(t *testing.T) {
 		core.MouseWheelEvent{DeltaY: 1},
 		core.MouseLeaveEvent{},
 	} {
-		if _, _, _, _, _, _, isMouse := describe(ev); !isMouse {
+		if _, _, _, _, _, _, isMouse := describeEvent(ev); !isMouse {
 			t.Errorf("%T is not filterable; it would flood the log with the "+
 				"checkbox off", ev)
 		}
@@ -83,7 +89,7 @@ func TestOnlyMouseEventsAreFilterable(t *testing.T) {
 		core.FocusEvent{Focused: true},
 		core.QuitEvent{},
 	} {
-		if _, _, _, _, _, _, isMouse := describe(ev); isMouse {
+		if _, _, _, _, _, _, isMouse := describeEvent(ev); isMouse {
 			t.Errorf("%T is filterable as a mouse event; it would vanish", ev)
 		}
 	}
@@ -106,8 +112,8 @@ func TestModifiersAreNamedApart(t *testing.T) {
 		{core.GlyphModifier, "Glyph"},
 		{core.SuperModifier | core.HyperModifier, "Super+Hyper"},
 	} {
-		if got := modString(tc.mods); got != tc.want {
-			t.Errorf("modString(%d) = %q, want %q", int(tc.mods), got, tc.want)
+		if got := eventModString(tc.mods); got != tc.want {
+			t.Errorf("eventModString(%d) = %q, want %q", int(tc.mods), got, tc.want)
 		}
 	}
 }

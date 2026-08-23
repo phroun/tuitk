@@ -314,6 +314,14 @@ type Desktop struct {
 	// dialog closes. Guarded by d.mu.
 	aboutBox *window.Window
 
+	// The Event Viewer accessory while its window is open, and the flag that
+	// remembers its event filter was installed. The filter is permanent
+	// (AddEventFilter has no counterpart) so it is installed at most once and
+	// gated on eventViewer being non-nil - closing the window stops the log
+	// by clearing the pointer, not by removing anything. Guarded by d.mu.
+	eventViewer          *eventViewer
+	eventViewerInstalled bool
+
 	// soloHosting is true while a window is being lifted onto the primary
 	// surface. The lift removes the window from the manager, which fires
 	// the removed-hook; this flag stops that internal removal from being
@@ -508,7 +516,7 @@ func (d *Desktop) createSystemMenu() *Menu {
 		d.showAboutDesktop()
 	}))
 	menu.AddItem(NewSeparator())
-	menu.AddItem(NewMenuItem("Desktop &Accessories").SetEnabled(false)) // Placeholder
+	menu.AddItem(NewMenuItem("Desktop &Accessories").SetSubMenu(d.createAccessoriesMenu()))
 	menu.AddItem(NewSeparator())
 
 	// Exit Desktop. The item names what it MEANS; which key that is, and
@@ -521,6 +529,132 @@ func (d *Desktop) createSystemMenu() *Menu {
 	menu.AddItem(exitItem)
 
 	return menu
+}
+
+// createAccessoriesMenu builds the Desktop Accessories submenu of the system
+// (Ψ) menu: the small tools that belong to the desktop rather than to any
+// application, and so are reachable whatever is running.
+func (d *Desktop) createAccessoriesMenu() *Menu {
+	menu := NewMenu("Desktop Accessories")
+	menu.AddItem(NewMenuItem("&Event Viewer").SetOnTriggered(func() {
+		d.showEventViewer()
+	}))
+	return menu
+}
+
+// modeSource finds whatever can answer for the keyboard's standing states.
+//
+// It is a different object on each host - the terminal backend knows what the
+// "kitty" protocol told it, the graphical platform can ask the window system -
+// and on a host that can see none of them it is neither, in which case the
+// viewer says so rather than drawing every latch as off.
+func (d *Desktop) modeSource() core.ModeSource {
+	d.mu.RLock()
+	plat, backend := d.platform, d.backend
+	d.mu.RUnlock()
+	if ms, ok := plat.(core.ModeSource); ok {
+		return ms
+	}
+	if ms, ok := backend.(core.ModeSource); ok {
+		return ms
+	}
+	return nil
+}
+
+// showEventViewer opens the Event Viewer accessory, or brings it forward if it
+// is already open.
+//
+// The log is fed by a desktop event filter, which sees each event before any
+// trinket has had a say and consumes nothing. That is what makes the accessory
+// worth having over a client-side equivalent: a client on the wire is handed
+// events already routed to its own trinkets and translated on the way, so the
+// near end of the trip - the part where a backend, a key layer and a router
+// can each be the one lying - is not visible from there at all.
+//
+// It is desktop-wide for the same reason. Events bound for any application's
+// windows pass through, so this can be opened to watch the program being
+// debugged rather than only itself.
+func (d *Desktop) showEventViewer() {
+	wm := d.WindowManager()
+	if wm == nil {
+		return
+	}
+
+	d.mu.RLock()
+	open := d.eventViewer
+	d.mu.RUnlock()
+	if open != nil {
+		if open.win != nil {
+			wm.ActivateWindow(open.win)
+		}
+		return
+	}
+
+	// Built before the lock is taken: modeSource takes d.mu itself, and
+	// nothing below here should hold the desktop's lock across trinket
+	// construction.
+	v := &eventViewer{modes: d.modeSource()}
+	win := window.NewWindow("Event Viewer")
+	win.SetContent(v.build())
+	v.win = win
+
+	d.mu.Lock()
+	if lost := d.eventViewer; lost != nil {
+		d.mu.Unlock()
+		if lost.win != nil {
+			wm.ActivateWindow(lost.win)
+		}
+		return
+	}
+	d.eventViewer = v
+
+	// One filter, ever. AddEventFilter has no counterpart, so a filter added
+	// per open would accumulate one dead closure per session; instead this is
+	// installed once and reads d.eventViewer each time, which is nil whenever
+	// the window is closed.
+	install := !d.eventViewerInstalled
+	d.eventViewerInstalled = true
+	d.mu.Unlock()
+
+	if install {
+		d.AddEventFilter(func(ev core.Event) bool {
+			d.mu.RLock()
+			v := d.eventViewer
+			d.mu.RUnlock()
+			if v != nil {
+				v.log(ev)
+			}
+			return false // consume nothing: this is an observer
+		})
+	}
+
+	// A size to exist at before it is laid out: a window that starts at zero
+	// has nothing to measure the tree's columns against on the first frame.
+	metrics := d.EffectiveCellMetrics()
+	win.SetBounds(core.UnitRect{
+		Width:  metrics.CellWidth * 96,
+		Height: metrics.CellHeight * 24,
+	})
+	wm.AddWindow(win)
+
+	area := wm.ClientArea()
+	b := win.Bounds()
+	x := area.X + (area.Width-b.Width)/2
+	y := area.Y + (area.Height-b.Height)/2
+	if !wm.SmoothPositioning() {
+		x = metrics.RoundDownToCellX(x)
+		y = metrics.RoundDownToCellY(y)
+	}
+	win.SetBounds(core.UnitRect{X: x, Y: y, Width: b.Width, Height: b.Height})
+	wm.ActivateWindow(win)
+
+	win.AddOnClosed(func() {
+		d.mu.Lock()
+		if d.eventViewer == v {
+			d.eventViewer = nil
+		}
+		d.mu.Unlock()
+	})
 }
 
 // aboutDesktopText is the body of the About KittyTK dialog: the recursive
