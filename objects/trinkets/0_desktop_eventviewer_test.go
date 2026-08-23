@@ -261,7 +261,7 @@ func TestEventViewerIsCellAligned(t *testing.T) {
 		d.windowManager = window.NewWindowManager()
 		d.windowManager.SetDesktop(d)
 		if d.windowManager.SmoothPositioning() {
-			t.Fatal("this manager positions smoothly; the grid rule would not apply")
+			t.Skip("this manager positions smoothly; the grid rule does not apply")
 		}
 		m := d.EffectiveCellMetrics()
 
@@ -362,4 +362,34 @@ func TestEventViewerTreeIsCellAligned(t *testing.T) {
 		}
 	}
 	walk(win.Content(), "content")
+}
+
+// ...and the snapping is a CELL-SURFACE rule only. A pixel surface places
+// windows at unit granularity on purpose, so rounding there would throw away
+// precision the graphical path exists to have. The gate is the manager's
+// SmoothPositioning, which the desktop sets from the backend.
+func TestEventViewerIsNotSnappedOnASmoothSurface(t *testing.T) {
+	// A size whose three-quarters cap is deliberately NOT a whole cell.
+	d := NewDesktop()
+	d.SetBounds(core.UnitRect{Width: 1000, Height: 700})
+	d.windowManager = window.NewWindowManager()
+	d.windowManager.SetDesktop(d)
+	d.windowManager.SetSmoothPositioning(true)
+
+	area := d.windowManager.ClientArea()
+	m := d.EffectiveCellMetrics()
+
+	eventViewerItem(t, d).OnTriggered()
+	b := d.windowManager.Windows()[0].Bounds()
+
+	// The cap is taken exactly, not rounded down to a cell.
+	if want := area.Width * 3 / 4; b.Width != want {
+		t.Errorf("width = %d, want the exact cap %d - a smooth surface must "+
+			"not be snapped", b.Width, want)
+	}
+	if b.Width%m.CellWidth == 0 {
+		t.Errorf("width %d happens to be cell-aligned, so this proves nothing; "+
+			"pick a desktop size whose cap is not a multiple of %d",
+			b.Width, m.CellWidth)
+	}
 }
