@@ -37,7 +37,7 @@ type nullBackend struct{ mu sync.Mutex }
 func (n *nullBackend) Init() error { return nil }
 func (n *nullBackend) Shutdown()   {}
 func (n *nullBackend) Metrics() core.CellMetrics {
-	return core.CellMetrics{CellWidth: 8, CellHeight: 16}
+	return core.CellMetrics{UnitsPerCellWidth: 8, UnitsPerCellHeight: 16}
 }
 func (n *nullBackend) Size() core.UnitSize {
 	return core.UnitSize{Width: 8 * 120, Height: 16 * 40}
@@ -50,7 +50,7 @@ func (n *nullBackend) DrawCell(core.Unit, core.Unit, rune, style.CellStyle) {}
 func (n *nullBackend) DrawText(x, y core.Unit, t string, s style.CellStyle, f *core.Font) core.Unit {
 	return 0
 }
-func (n *nullBackend) DrawTextAligned(core.UnitRect, string, core.Alignment, core.Alignment, style.CellStyle, *core.Font) {
+func (n *nullBackend) DrawTextAligned(core.UnitRect, string, core.HSide, core.VAlign, style.CellStyle, *core.Font) {
 }
 func (n *nullBackend) FillRect(core.UnitRect, rune, style.CellStyle)                     {}
 func (n *nullBackend) DrawRect(core.UnitRect, style.BorderStyle, style.CellStyle)        {}

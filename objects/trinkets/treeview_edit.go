@@ -36,7 +36,22 @@ import (
 
 // treeClickEditSlop is how far the pointer may travel between press
 // and release before the click stops counting as a click.
+//
+// A physical distance -- the wobble a hand puts into a click -- so it is
+// written in the DEFAULT denomination and exchanged into the tree's own by
+// clickEditSlop. A raw unit count would be a different distance in every tree:
+// half a cell across at 8x16 and an eighth at 32x64, so the same wobble read as
+// a click in one and a drag in the next.
 const treeClickEditSlop = core.Unit(4)
+
+// clickEditSlop is treeClickEditSlop in this tree's units, per axis. The two
+// answers differ wherever the denomination is not square, which is usually:
+// the same physical distance is fewer units across a cell than down one.
+func (t *TreeView) clickEditSlop() (dx, dy core.Unit) {
+	m := t.EffectiveCellMetrics()
+	d := core.DefaultCellMetrics()
+	return core.ExchangeX(treeClickEditSlop, d, m), core.ExchangeY(treeClickEditSlop, d, m)
+}
 
 // treeKeyColumn is the sentinel identifying the KEY (tree) column in
 // the edit ring. It never lives in t.columns and is never painted
@@ -103,7 +118,7 @@ func (t *TreeView) setCellValue(item *TreeItem, col *TreeColumn, v string) {
 // tree-hosting cell: the indent, the expander cell, and the icon
 // (when the item has one) - mirroring paintTreeCell exactly.
 func (t *TreeView) treeCellTextInset(item *TreeItem) core.Unit {
-	cw := t.EffectiveCellMetrics().CellWidth
+	cw := t.EffectiveCellMetrics().UnitsPerCellWidth
 	inset := core.Unit(item.Level()*t.indentWidth+1+treeLeftPadCells) * cw
 	if item.Icon != nil && len(item.Icon.Cells) > 0 {
 		inset += cw * 2
@@ -322,7 +337,7 @@ func (t *TreeView) ensureColVisible(col *TreeColumn) {
 		return
 	}
 	lay := t.columnLayout()
-	cw := t.EffectiveCellMetrics().CellWidth
+	cw := t.EffectiveCellMetrics().UnitsPerCellWidth
 	for _, sp := range lay.spans {
 		if !spanMatchesCol(sp, col) {
 			continue
@@ -600,12 +615,12 @@ func (t *TreeView) editorRect() (core.UnitRect, bool) {
 		if !spanMatchesCol(sp, t.editCol) {
 			continue
 		}
-		clip, ok := lay.spanClip(sp, metrics.CellHeight)
+		clip, ok := lay.spanClip(sp, metrics.UnitsPerCellHeight)
 		if !ok {
 			return core.UnitRect{}, false
 		}
-		y := lay.headerH + core.Unit(row)*metrics.CellHeight
-		r := core.UnitRect{X: clip.X, Y: y, Width: clip.Width, Height: metrics.CellHeight}
+		y := lay.headerH + core.Unit(row)*metrics.UnitsPerCellHeight
+		r := core.UnitRect{X: clip.X, Y: y, Width: clip.Width, Height: metrics.UnitsPerCellHeight}
 		// A tree-hosting cell's editor starts where the caption TEXT
 		// starts - past the indent, expander, and icon - so it lines
 		// up with the value it replaces.
@@ -736,9 +751,9 @@ func (t *TreeView) treeCellEditZone(sp colSpan, item *TreeItem) (x0, w core.Unit
 		text = sp.col.displayValue(item.Value(sp.col.ID))
 	}
 	font := t.EffectiveFont()
-	shown := strings.TrimSuffix(ellipsizeText(font, text, avail), "…")
-	zone := font.MeasureText(shown)
-	if min := 2 * metrics.CellWidth; zone < min {
+	shown := strings.TrimSuffix(ellipsizeText(font, metrics, text, avail), "…")
+	zone := t.MeasureText(shown)
+	if min := 2 * metrics.UnitsPerCellWidth; zone < min {
 		zone = min
 	}
 	if zone > avail {
@@ -772,7 +787,7 @@ func (t *TreeView) editableColumnAt(x core.Unit, item *TreeItem) *TreeColumn {
 		} else if !col.Editable {
 			continue
 		}
-		clip, ok := lay.spanClip(sp, metrics.CellHeight)
+		clip, ok := lay.spanClip(sp, metrics.UnitsPerCellHeight)
 		if !ok || x < clip.X || x >= clip.X+clip.Width {
 			continue
 		}
@@ -799,7 +814,7 @@ func (t *TreeView) noteClickEditPress(event core.MousePressEvent) {
 		return
 	}
 	metrics := t.EffectiveCellMetrics()
-	row := t.scrollOffset + int((event.Y-headerH)/metrics.CellHeight)
+	row := t.scrollOffset + int((event.Y-headerH)/metrics.UnitsPerCellHeight)
 	if row != t.currentIndex || row < 0 || row >= len(t.flatList) {
 		return
 	}
@@ -829,7 +844,8 @@ func (t *TreeView) armClickEdit(event core.MouseReleaseEvent) {
 	if dy < 0 {
 		dy = -dy
 	}
-	if dx > treeClickEditSlop || dy > treeClickEditSlop {
+	slopX, slopY := t.clickEditSlop()
+	if dx > slopX || dy > slopY {
 		return // a drag, not a click
 	}
 	if t.rowEditing || t.CurrentItem() != item || !t.colEditable(col) {

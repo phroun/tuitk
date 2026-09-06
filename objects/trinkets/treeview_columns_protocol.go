@@ -34,7 +34,6 @@ import (
 // adopt its members as if appended directly - it is packaging, not
 // a trinket.
 type wireCollection struct {
-	of      string // advisory: what the members are ("columns", ...)
 	members []any
 }
 
@@ -208,25 +207,20 @@ func colFlag(name string, set func(col *TreeColumn, b bool)) protocol.Property {
 }
 
 func init() {
-	// The generic keyed grouping. Parents that understand collections
-	// adopt the members; `of` is advisory documentation on the wire.
+	// The generic keyed grouping: a bag built in one batch and handed to a
+	// parent in a later one, for the cell values that cannot be written
+	// during the first build. Parents that understand collections adopt
+	// the members. What the members are is the business of the property
+	// the bag is poured into, so the bag itself says nothing about them.
 	protocol.RegisterType("collection", &protocol.TypeSpec{
 		Virtual: true,
 		New:     func() any { return &wireCollection{} },
 		Props: map[string]protocol.Property{
-			"of": protocol.NewProperty("word", wprop("of", func(_ *protocol.BindContext, c *wireCollection, v *protocol.Value, f protocol.FlagState) error {
-				w, err := protocol.AsWord("of", v, f)
-				if err != nil {
-					return err
-				}
-				c.of = w
+			"children": protocol.NewCollection(func(parent, child any) error {
+				p := parent.(*wireCollection)
+				p.members = append(p.members, child)
 				return nil
-			})).Tip("Advisory member kind (columns, cells, ...)."),
-		},
-		Append: func(parent, child any) error {
-			p := parent.(*wireCollection)
-			p.members = append(p.members, child)
-			return nil
+			}).Tip("The grouped objects, in order."),
 		},
 	})
 
@@ -238,7 +232,7 @@ func init() {
 		// columns silently lose the divider drag and the [=] chooser.
 		New: func() any {
 			return &wireColumn{col: TreeColumn{
-				Width: 8, MinWidth: 3, Align: "left",
+				Width: 8, MinWidth: 3, MaxWidth: -1, Align: "left",
 				Resizable: true, Optional: true, SortProxy: -1,
 			}}
 		},
@@ -255,7 +249,8 @@ func init() {
 			"caption":   colString("caption", func(c *TreeColumn, s string) { c.Caption = s }).Tip("Header caption."),
 			"width":     colInt("width", func(c *TreeColumn, n int) { c.Width = n }).Tip("Width in text cells.").Def("8"),
 			"min_width": colInt("min_width", func(c *TreeColumn, n int) { c.MinWidth = n }).Tip("Minimum width in text cells.").Def("3"),
-			"max_width": colInt("max_width", func(c *TreeColumn, n int) { c.MaxWidth = n }).Tip("Maximum width in text cells (0 = unbounded).").Def("0"),
+			"max_width": colInt("max_width", func(c *TreeColumn, n int) { c.MaxWidth = n }).
+				Tip("Widest the column may be dragged, in text cells. -1 is no limit; a maximum below min_width loses to it.").Def("-1"),
 			"align": protocol.NewProperty("enum", colProp("align", func(c *wireColumn, v *protocol.Value, f protocol.FlagState) error {
 				w, err := protocol.AsWord("align", v, f)
 				if err != nil {
@@ -304,26 +299,26 @@ func init() {
 				}
 				return fmt.Errorf("enum_store: expected key or value")
 			})).OneOf("key", "value").Def("value").Tip("What a chosen option stores in the data field (cells always DISPLAY the option value)."),
-		},
-		Append: func(parent, child any) error {
-			p := parent.(*wireColumn)
-			switch c := child.(type) {
-			case *wireCell:
-				p.cells = append(p.cells, c)
-				c.apply(p)
-				return nil
-			case *wireCollection:
-				for _, m := range c.members {
-					cell, ok := m.(*wireCell)
-					if !ok {
-						return fmt.Errorf("column: collection members must be cells, got %T", m)
+			"children": protocol.NewCollection(func(parent, child any) error {
+				p := parent.(*wireColumn)
+				switch c := child.(type) {
+				case *wireCell:
+					p.cells = append(p.cells, c)
+					c.apply(p)
+					return nil
+				case *wireCollection:
+					for _, m := range c.members {
+						cell, ok := m.(*wireCell)
+						if !ok {
+							return fmt.Errorf("column: collection members must be cells, got %T", m)
+						}
+						p.cells = append(p.cells, cell)
+						cell.apply(p)
 					}
-					p.cells = append(p.cells, cell)
-					cell.apply(p)
+					return nil
 				}
-				return nil
-			}
-			return fmt.Errorf("column: children must be cells, got %T", child)
+				return fmt.Errorf("column: children must be cells, got %T", child)
+			}).Members("cell", "collection").Tip("This column's values, one per item."),
 		},
 	})
 
@@ -406,5 +401,34 @@ func treeViewProps() map[string]protocol.Property {
 		"descending": boolProp("descending", func(t *TreeView, b bool) {
 			t.SetSorted(t.sorted, t.sortedBy, b)
 		}).Tip("Sort direction indicator points down.").Def("false"),
+
+		"children": protocol.NewCollection(func(parent, child any) error {
+			tv, ok := parent.(*TreeView)
+			if !ok {
+				return fmt.Errorf("treeview: wrong parent type %T", parent)
+			}
+			switch c := child.(type) {
+			case *wireItem:
+				tv.AddRootItem(c.bind(tv))
+				return nil
+			case *wireColumn:
+				return c.bind(tv)
+			case *wireCollection:
+				// A collection is packaging: adopt each member as if
+				// appended directly.
+				for _, m := range c.members {
+					col, ok := m.(*wireColumn)
+					if !ok {
+						return fmt.Errorf("treeview: collection members must be columns, got %T", m)
+					}
+					if err := col.bind(tv); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			return fmt.Errorf("treeview: children must be items or columns, got %T", child)
+		}).Members("item", "column", "collection").
+			Tip("The rows and the columns they are read across."),
 	}
 }

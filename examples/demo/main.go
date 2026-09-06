@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/phroun/kittytk/client"
-	"github.com/phroun/kittytk/inprocess"
 	"github.com/phroun/kittytk/core"
 	"github.com/phroun/kittytk/display"
+	"github.com/phroun/kittytk/inprocess"
 	"github.com/phroun/kittytk/layout"
 	"github.com/phroun/kittytk/objects/app"
 	"github.com/phroun/kittytk/objects/trinkets"
@@ -36,7 +36,7 @@ func newFixedWidthBox(width core.Unit, content core.Trinket) *fixedWidthBox {
 	boxLayout := layout.NewBoxLayout(core.Vertical)
 	f.AddChild(content)
 	f.SetLayoutManager(boxLayout)
-	boxLayout.ItemAt(0).WithAlign(core.AlignFill)
+	boxLayout.ItemAt(0).WithAlign(core.DefaultAlignment())
 	return f
 }
 

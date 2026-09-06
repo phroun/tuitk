@@ -101,14 +101,16 @@ func init() {
 			})
 		},
 		Props: map[string]protocol.Property{
-			"fill": protocol.NewProperty("string", wprop("fill", func(_ *protocol.BindContext, m *MDIPane, v *protocol.Value, f protocol.FlagState) error {
-				s, err := protocol.AsString("fill", v, f)
+			// background_char, not fill: fill is the common property for
+			// which axes an item grows to, and this names a character.
+			"background_char": protocol.NewProperty("string", wprop("background_char", func(_ *protocol.BindContext, m *MDIPane, v *protocol.Value, f protocol.FlagState) error {
+				s, err := protocol.AsString("background_char", v, f)
 				if err != nil {
 					return err
 				}
 				runes := []rune(s)
 				if len(runes) != 1 {
-					return fmt.Errorf("fill: expected exactly one character")
+					return fmt.Errorf("background_char: expected exactly one character")
 				}
 				m.SetBackgroundChar(runes[0])
 				return nil
@@ -126,22 +128,22 @@ func init() {
 			"restore":  protocol.NewProperty("int", mdiWindowAction("restore", (*MDIPane).RestoreWindow)).Tip("Restore a hosted window by id"),
 			"minimize": protocol.NewProperty("int", mdiWindowAction("minimize", (*MDIPane).MinimizeWindow)).Tip("Minimize a hosted window by id"),
 			"remove":   protocol.NewProperty("int", mdiWindowAction("remove", (*MDIPane).RemoveWindow)).Tip("Close a hosted window by id"),
-		},
-		Append: func(parent, child any) error {
-			m := parent.(*MDIPane)
-			switch c := child.(type) {
-			case *window.Window:
-				m.AddWindow(c)
-				return nil
-			case core.Trinket:
-				if m.Content() != nil {
-					return fmt.Errorf("mdipane: background content already set")
+			"children": protocol.NewCollection(func(parent, child any) error {
+				m := parent.(*MDIPane)
+				switch c := child.(type) {
+				case *window.Window:
+					m.AddWindow(c)
+					return nil
+				case core.Trinket:
+					if m.Content() != nil {
+						return fmt.Errorf("mdipane: background content already set")
+					}
+					m.SetContent(c)
+					return nil
+				default:
+					return fmt.Errorf("mdipane: children must be windows or a content trinket, got %T", child)
 				}
-				m.SetContent(c)
-				return nil
-			default:
-				return fmt.Errorf("mdipane: children must be windows or a content trinket, got %T", child)
-			}
+			}).Tip("The windows this pane hosts, and one trinket behind them."),
 		},
 		Destroy: func(t any) error {
 			return destroyTrinket(t.(*MDIPane))

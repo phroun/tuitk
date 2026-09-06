@@ -35,7 +35,7 @@ import (
 // cannot render seven tenths of a character cell.
 type TitleBarMetrics struct {
 	Scale   float64
-	RowH    core.Unit  // title row height in frame units (CellHeight at 1.0)
+	RowH    core.Unit  // title row height in frame units (UnitsPerCellHeight at 1.0)
 	CellW   core.Unit  // cell pitch the controls/text lay out on
 	ButtonW core.Unit  // one control slot: three of those cells
 	YOff    core.Unit  // vertical centering of scaled glyphs in the row (0 at 1.0)
@@ -71,15 +71,15 @@ func TitleBarMetricsFor(metrics core.CellMetrics, font *core.Font, graphical boo
 	}
 	tm := TitleBarMetrics{
 		Scale:     scale,
-		RowH:      metrics.CellHeight,
-		CellW:     metrics.CellWidth,
+		RowH:      metrics.UnitsPerCellHeight,
+		CellW:     metrics.UnitsPerCellWidth,
 		Font:      font,
 		Graphical: graphical,
 		base:      metrics,
 	}
 	if scale != 1 {
-		tm.RowH = core.Unit(math.Ceil(scale * float64(metrics.CellHeight)))
-		tm.CellW = core.Unit(math.Ceil(scale * float64(metrics.CellWidth)))
+		tm.RowH = core.Unit(math.Ceil(scale * float64(metrics.UnitsPerCellHeight)))
+		tm.CellW = core.Unit(math.Ceil(scale * float64(metrics.UnitsPerCellWidth)))
 	}
 	// The two faces this bar draws with: the title text's, and ui-term for
 	// the monospaced controls. Both are a pure function of (source font,
@@ -89,17 +89,32 @@ func TitleBarMetricsFor(metrics core.CellMetrics, font *core.Font, graphical boo
 	// call put that garbage on the frame path.
 	tm.Font, tm.Mono = titleFaces(font, scale)
 	if scale != 1 && font != nil && tm.Font != nil {
-		// The glyph box is CellHeight (in units) at the base point size
+		// The glyph box is UnitsPerCellHeight (in units) at the base point size
 		// and scales with it; center what remains of the row around it,
 		// FLOORING the slack — rounding the half-gap up sat the text a
 		// unit too low in the shortened row.
-		glyphH := float64(metrics.CellHeight) * float64(tm.Font.Size) / float64(font.Size)
+		glyphH := float64(metrics.UnitsPerCellHeight) * float64(tm.Font.Size) / float64(font.Size)
 		if off := core.Unit((float64(tm.RowH) - glyphH) / 2); off > 0 {
 			tm.YOff = off
 		}
 	}
 	tm.ButtonW = tm.CellW * 3
 	return tm
+}
+
+// TitleWidth measures title text in the bar's own denomination -- the
+// frame's, the one RowH, CellW, ButtonW and every X the bar places are
+// counted in. Font.MeasureText answers in the default denomination
+// instead, which is the same width in a different currency and only
+// matches when the frame happens to be at 8x16.
+func (tm TitleBarMetrics) TitleWidth(text string) core.Unit {
+	return tm.Font.MeasureTextIn(text, tm.base)
+}
+
+// GlyphWidth measures a control's monospaced run -- "[x]", "[_]" -- in the
+// same terms, so it centers inside a ButtonW slot.
+func (tm TitleBarMetrics) GlyphWidth(text string) core.Unit {
+	return tm.Mono.MeasureTextIn(text, tm.base)
 }
 
 // titleFacesKey identifies one (source font, scale) pair. core.Font is a
@@ -189,7 +204,7 @@ func paintThreeCellButton(p *core.Painter, tm TitleBarMetrics, x core.Unit, icon
 	}
 	p.FillRect(core.UnitRect{X: x, Width: tm.ButtonW, Height: tm.RowH}, ' ', st)
 	run := "[" + string(icon) + "]"
-	rx := x + (tm.ButtonW-tm.Mono.MeasureText(run))/2
+	rx := x + (tm.ButtonW-tm.GlyphWidth(run))/2
 	if rx < x {
 		rx = x
 	}
@@ -239,7 +254,7 @@ func PaintTearHandleSlot(p *core.Painter, tm TitleBarMetrics, x core.Unit, glyph
 	}
 	p.FillRect(core.UnitRect{X: x, Width: tm.ButtonW, Height: tm.RowH}, ' ', titleSt)
 	g := string(glyph)
-	gx := x + (tm.ButtonW-tm.Mono.MeasureText(g))/2
+	gx := x + (tm.ButtonW-tm.GlyphWidth(g))/2
 	if gx < x {
 		gx = x
 	}
@@ -259,13 +274,13 @@ func PaintTitleBarText(p *core.Painter, tm TitleBarMetrics, title string, ts sty
 		return
 	}
 	display := title
-	titleW := tm.Font.MeasureText(display)
+	titleW := tm.TitleWidth(display)
 	if titleW > avail {
-		display = ellipsizeToWidth(title, avail, tm.Font)
+		display = ellipsizeToWidth(title, avail, tm.Font, tm.base)
 		if display == "" {
 			return
 		}
-		titleW = tm.Font.MeasureText(display)
+		titleW = tm.TitleWidth(display)
 	}
 	x := (barWidth - titleW) / 2
 	if x < leftEdge {
@@ -289,7 +304,7 @@ func PaintTitleBarText(p *core.Painter, tm TitleBarMetrics, title string, ts sty
 // bar's focused title — a window's or the desktop's — draws through it.)
 func PaintFocusedTitleDecoration(p *core.Painter, tm TitleBarMetrics, innerWidth core.Unit, title string, s style.CellStyle) {
 	decorated := "< " + title + " >"
-	totalWidth := tm.Font.MeasureText(decorated)
+	totalWidth := tm.TitleWidth(decorated)
 	startX := (innerWidth - totalWidth) / 2
 	if startX < 0 {
 		startX = 0
@@ -345,7 +360,7 @@ func DecodeTitleGeometry(cmd string) (dir string, resize, coarse, ok bool) {
 // TitleGeometryDelta turns a decoded direction into a unit delta at the
 // standard steps: one cell fine, the 10-column/4-row step coarse.
 func TitleGeometryDelta(dir string, coarse bool, metrics core.CellMetrics) (dx, dy core.Unit) {
-	h, v := metrics.CellWidth, metrics.CellHeight
+	h, v := metrics.UnitsPerCellWidth, metrics.UnitsPerCellHeight
 	if coarse {
 		h *= 10
 		v *= 4
@@ -382,8 +397,8 @@ func MinHostSizePx(metrics core.CellMetrics, ppu float64) (w, h int) {
 	if ppu <= 0 {
 		ppu = 1
 	}
-	return int(math.Round(float64(metrics.CellWidth*MinHostCols) * ppu)),
-		int(math.Round(float64(metrics.CellHeight*MinHostRows) * ppu))
+	return int(math.Round(float64(metrics.UnitsPerCellWidth*MinHostCols) * ppu)),
+		int(math.Round(float64(metrics.UnitsPerCellHeight*MinHostRows) * ppu))
 }
 
 // DoubleClickTracker is the title bars' double-click convention: a second
@@ -391,27 +406,46 @@ func MinHostSizePx(metrics core.CellMetrics, ppu float64) (w, h int) {
 // memory (a third click starts fresh rather than tripling). Callers that
 // track a target identity (the window manager, per window) Reset it when
 // the target changes.
+//
+// A double-click is press, RELEASE, press. The release is tracked because a
+// press on its own is not a click: one delivered twice -- a terminal
+// reporting the same button on two tracking modes, a host replaying an event,
+// a gesture that presses again without the button ever coming up -- would
+// otherwise complete a double-click by itself, and every single click would
+// read as one.
 type DoubleClickTracker struct {
-	at   time.Time
-	x, y core.Unit
+	at       time.Time
+	x, y     core.Unit
+	released bool
 }
 
 // Press records a press and reports whether it completed a double-click.
 func (t *DoubleClickTracker) Press(x, y core.Unit, metrics core.CellMetrics) bool {
 	now := time.Now()
-	isDouble := !t.at.IsZero() &&
+	isDouble := t.released && !t.at.IsZero() &&
 		now.Sub(t.at) < 400*time.Millisecond &&
-		x-t.x < metrics.CellWidth && t.x-x < metrics.CellWidth &&
-		y-t.y < metrics.CellHeight && t.y-y < metrics.CellHeight
+		x-t.x < metrics.UnitsPerCellWidth && t.x-x < metrics.UnitsPerCellWidth &&
+		y-t.y < metrics.UnitsPerCellHeight && t.y-y < metrics.UnitsPerCellHeight
 	if isDouble {
 		t.at = time.Time{}
+		t.released = false
 		return true
 	}
 	t.at, t.x, t.y = now, x, y
+	t.released = false
 	return false
 }
+
+// Release records the button coming back up, which is what makes the next
+// press a second CLICK rather than a repeat of the first.
+func (t *DoubleClickTracker) Release() { t.released = true }
+
+// Armed reports whether a press is pending -- whether the next one could
+// complete a double-click.
+func (t *DoubleClickTracker) Armed() bool { return !t.at.IsZero() }
 
 // Reset forgets the pending click (the next press starts a fresh count).
 func (t *DoubleClickTracker) Reset() {
 	t.at = time.Time{}
+	t.released = false
 }
