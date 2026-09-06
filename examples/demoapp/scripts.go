@@ -74,7 +74,7 @@ func indent(s, prefix string) string {
 }
 
 // mainBuildScript is the whole primary application in one build: the
-// KittyTK Demo window (nine tabs), its menu bar and its status bar.
+// KittyTK Demo window and its tab gallery, its menu bar and its status bar.
 // The display adopts each top-level object - window, menubar, statusbar -
 // as the connection's application chrome.
 func mainBuildScript() string {
@@ -103,21 +103,21 @@ b=new tab caption="Basic Trinkets" children={
 
 s=new tab caption="Selection" children={
 	o=new panel layout=vbox spacing=0 children={
-		new panel layout=hbox spacing=8 align=fill children={
+		new panel layout=hbox spacing=8 children={
 			new panel border layout=vbox fixed_width=256 children={
-				new label caption="The quick brown fox jumps over the lazy dog and then keeps trotting along the whole fence" wrap align=fill
+				new label caption="The quick brown fox jumps over the lazy dog and then keeps trotting along the whole fence" wrap
 			}
 			new panel border layout=vbox fixed_width=256 children={
-				new label caption="Pack my box with five dozen liquor jugs before the Tuesday checkbox below doubles every letter" wrap align=fill
+				new label caption="Pack my box with five dozen liquor jugs before the Tuesday checkbox below doubles every letter" wrap
 			}
 			new panel border layout=vbox fixed_width=288 children={
-				new panel layout=vbox align=fill children={
+				new panel layout=vbox children={
 					new checkbox caption="Enable the experimental feature that reticulates splines while the moon is full" wrap
 					new radiobutton caption="Prefer the long-form explanation whenever the assistant answers a question" wrap
 				}
 			}
 		}
-		sp=new splitter orientation=vertical position=0.4 stretch=1 align=fill children={
+		sp=new splitter orientation=vertical position=0.4 stretch=1 children={
 			c=new panel layout=vbox spacing=0 children={
 				new label caption="Checkboxes:"
 				new checkbox caption="Enable feature A" checked
@@ -161,7 +161,7 @@ new tab caption="Lists" children={
 	new splitter orientation=horizontal position=0.5 children={
 		new panel layout=vbox children={
 			new label caption="ListView:"
-			new listview children={`)
+			new listview min_width=160 min_height=160 children={`)
 	for i := 1; i <= 20; i++ {
 		fmt.Fprintf(&b, "\n\t\t\t\tnew item caption=\"Item %d\"", i)
 	}
@@ -170,7 +170,7 @@ new tab caption="Lists" children={
 		}
 		new panel layout=vbox children={
 			new label caption="TreeView:"
-			new treeview children={` + indent(treeItemsScript, "\t\t\t\t") + `}
+			new treeview min_width=160 min_height=160 children={` + indent(treeItemsScript, "\t\t\t\t") + `}
 		}
 	}
 }
@@ -218,7 +218,7 @@ new tab caption="Scroll Lists" children={
 		new scrollarea children={
 			new panel layout=vbox children={
 				new label caption="ListView (scrollable container):"
-				new listview children={`)
+				new listview min_width=160 min_height=160 children={`)
 	for i := 1; i <= 20; i++ {
 		fmt.Fprintf(&b, "\n\t\t\t\t\tnew item caption=\"Item %d\"", i)
 	}
@@ -234,9 +234,9 @@ new tab caption="Scroll Lists" children={
 		new scrollarea children={
 			new panel layout=vbox children={
 				new label caption="TreeView (scrollable container):"
-				new treeview children={` + indent(treeItemsScript, "\t\t\t\t\t") + `}
+				new treeview min_width=160 min_height=160 children={` + indent(treeItemsScript, "\t\t\t\t\t") + `}
 				new label caption="Extra content below TreeView:"
-				new textinput placeholder="Type something..."
+				new textinput min_width=160 placeholder="Type something..."
 			}
 		}
 	}
@@ -248,36 +248,36 @@ tf=new tab caption="Text Fields" children={
 		tfrow=new panel layout=hbox spacing=8 children={
 			tfl=new panel layout=vbox spacing=0 stretch=1 children={
 				new label caption="Plain, with a placeholder:"
-				new textinput placeholder="Type here..."
+				new textinput min_width=160 placeholder="Type here..."
 
 				new label caption="Pre-filled, from text=:"
-				new textinput text="already typed"
+				new textinput min_width=160 text="already typed"
 
 				new label caption="readonly - selectable, not editable:"
-				new textinput text="you can copy this but not change it" readonly
+				new textinput min_width=160 text="you can copy this but not change it" readonly
 
 				new label caption="!enabled - not reachable at all:"
-				new textinput text="disabled" !enabled
+				new textinput min_width=160 text="disabled" !enabled
 
 				new label caption="max_length=8 - stops accepting at 8:"
-				new textinput placeholder="8 max" max_length=8
+				new textinput min_width=160 placeholder="8 max" max_length=8
 			}
 			tfr=new panel layout=vbox spacing=0 stretch=1 children={
 				new label caption="echo=password - masked with the default bullet:"
-				new textinput text="hunter2" echo=password
+				new textinput min_width=160 text="hunter2" echo=password
 
 				new label caption="echo=password mask=\"*\" - masked with a star:"
-				new textinput text="hunter2" echo=password mask="*"
+				new textinput min_width=160 text="hunter2" echo=password mask="*"
 
 				new label caption="echo=none - accepts typing, shows nothing:"
-				new textinput text="invisible" echo=none
+				new textinput min_width=160 text="invisible" echo=none
 
 				new label caption="Live: change fires per edit, complete on Return."
-				tfwatch=new textinput placeholder="Type, then press Return..."
+				tfwatch=new textinput min_width=160 placeholder="Type, then press Return..."
 				tfecho=new label caption="(nothing yet)"
 
 				new label caption="Masked, and you choose the mask:"
-				tfmask=new textinput text="secret" echo=password
+				tfmask=new textinput min_width=160 text="secret" echo=password
 				tfmrow=new panel layout=hbox spacing=8 children={
 					tfmb=new radiobutton caption="bullet" group=tfmaskg checked
 					tfms=new radiobutton caption="star" group=tfmaskg
@@ -289,15 +289,146 @@ tf=new tab caption="Text Fields" children={
 	}
 }
 
+dn=new tab caption="Denomination" children={
+	dnp=new panel layout=vbox spacing=8 children={
+		new label caption="Denomination is how many units make one character cell -- 8 wide by 16 tall by default. Setting it on this window re-expresses every unit inside it, so the whole page below changes size while the window does not."
+		new label caption="column_units is the X axis, row_units the Y. They are independent: a tall thin cell is 8 by 32, a squat one 16 by 8."
+		dnrow=new panel layout=hbox spacing=8 children={
+			new label caption="X:"
+			dnx=new textinput min_width=160 text="8" max_length=2
+			new label caption="Y:"
+			dny=new textinput min_width=160 text="16" max_length=2
+			dnap=new button caption="Apply" default
+		}
+		new label caption="Type in either field and press Return, or use Apply. Presets:"
+		dnpre=new panel layout=hbox spacing=8 children={
+			dnd=new button caption="8 x 16 (default)"
+			dnh=new button caption="4 x 8 (half)"
+			dnt=new button caption="16 x 32 (double)"
+			dns=new button caption="16 x 16 (square)"
+			dnn=new button caption="8 x 32 (narrow)"
+		}
+		dnecho=new label caption="Currently 8 x 16 (inherited -- no override set)."
+		new spacer
+	}
+}
+
+new tab caption="Grid" children={
+	new panel layout=vbox spacing=8 children={
+		new label caption="A form: labels in a column that sizes to them, fields in one that takes the rest."
+		new panel border layout=grid spacing=8 columns={
+			new band id=labels
+			new band id=fields stretch=1
+		} children={
+			new label caption="Name:" row=0 column=labels halign=textend fill=none
+			new textinput row=0 column=fields placeholder="Ada Lovelace"
+			new label caption="Address:" row=1 column=labels halign=textend fill=none
+			new textinput row=1 column=fields placeholder="12 Marylebone Road"
+			new label caption="Notes:" row=2 column=labels halign=textend valign=top fill=none
+			new textinput row=2 column=fields placeholder="anything at all"
+			new panel layout=hbox spacing=8 row=3 column=labels column_span=2 halign=textend fill=none children={
+				new button caption="Save" action=demo.grid.save
+				new button caption="Cancel" action=demo.grid.cancel
+			}
+		}
+		new label caption="A span: the button row above covers both columns and sits at the trailing edge."
+		new panel border layout=grid spacing=4 columns={
+			new band stretch=1
+			new band stretch=1
+			new band stretch=1
+			new band stretch=1
+		} children={
+			new button caption="1" row=0 column=0 fill=none
+			new button caption="2" row=0 column=1 fill=none
+			new button caption="3" row=0 column=2 fill=none
+			new button caption="tall" row=0 column=3 row_span=2 fill=none
+			new button caption="4" row=1 column=0 fill=none
+			new button caption="wide" row=1 column=1 column_span=2 fill=none
+		}
+		new spacer
+	}
+}
+
+new tab caption="Flex" children={
+	new panel layout=vbox spacing=8 children={
+		new label caption="Wrapping: eight cards in a run that breaks when it runs out of room."
+		new panel border layout=flex flex_wrap=wrap spacing=4 align_items=begin children={
+			new button caption="Alpha"
+			new button caption="Bravo"
+			new button caption="Charlie"
+			new button caption="Delta"
+			new button caption="Echo"
+			new button caption="Foxtrot"
+			new button caption="Golf"
+			new button caption="Hotel"
+		}
+		new label caption="Justify: leftover space spread between the buttons, which no box can do."
+		new panel border layout=flex justify=space_between spacing=0 align_items=center children={
+			new button caption="Left"
+			new button caption="Middle"
+			new button caption="Right"
+		}
+		new label caption="Grow: one part to three, so the second field takes three times the leftover."
+		new panel border layout=flex spacing=8 align_items=center children={
+			new textinput grow=1 placeholder="one part"
+			new textinput grow=3 placeholder="three parts"
+		}
+		new spacer
+	}
+}
+
+lim=new tab caption="Limits" children={
+	limv=new panel layout=vbox spacing=8 children={
+		new label caption="A maximum stops one child, and the others take what it turned down."
+		limrun=new panel border layout=hbox spacing=8 children={
+			new panel border layout=vbox stretch=1 children={ new label caption="grows" }
+			lmid=new panel border layout=vbox stretch=1 children={ new label caption="capped" }
+			new panel border layout=vbox stretch=1 children={ new label caption="grows" }
+		}
+		limg=new panel layout=grid spacing=4 columns={
+			new band id=lcap
+			new band id=lval stretch=1
+		} children={
+			new label caption="max_width:" row=0 column=lcap halign=textend fill=none
+			limmaxrow=new panel layout=hbox spacing=4 row=0 column=lval children={
+				lmaxnone=new radiobutton caption="none" group=limmax checked
+				lmax200=new radiobutton caption="200" group=limmax
+				lmax120=new radiobutton caption="120" group=limmax
+				lmax40=new radiobutton caption="40" group=limmax
+				lmax0=new radiobutton caption="0" group=limmax
+			}
+			new label caption="min_width:" row=1 column=lcap halign=textend fill=none
+			limminrow=new panel layout=hbox spacing=4 row=1 column=lval children={
+				lmin0=new radiobutton caption="none" group=limmin checked
+				lmin160=new radiobutton caption="160" group=limmin
+			}
+		}
+		new label caption="A minimum beats a maximum. At max_width=0 the box keeps the two columns its own border needs."
+
+		new label caption="Stopped short of the room it was given, it sits where its alignment says."
+		limcell=new panel border layout=grid spacing=0 columns={ new band stretch=1 } children={
+			lfill=new button caption="max 120" max_width=120
+		}
+		limalignrow=new panel layout=hbox spacing=4 children={
+			new label caption="halign:" fill=none
+			lhbegin=new radiobutton caption="textbegin" group=limalign
+			lhcenter=new radiobutton caption="center" group=limalign checked
+			lhend=new radiobutton caption="textend" group=limalign
+			lhfill=new checkbox caption="fill" checked
+		}
+		new spacer
+	}
+}
+
 new tab caption="Progress" children={
 	new panel layout=vbox spacing=16 children={
 		new label caption="Horizontal Progress Bars:"
-		new progress value=25
-		new progress value=50
-		new progress value=75
-		new progress value=100
+		new progress min_width=160 value=25
+		new progress min_width=160 value=50
+		new progress min_width=160 value=75
+		new progress min_width=160 value=100
 		new label caption="Indeterminate Progress:"
-		new progress indeterminate
+		new progress min_width=160 indeterminate
 	}
 }
 
@@ -320,7 +451,7 @@ new tab caption="Bottom Tabs" children={
 		new tab caption="Third" children={
 			new panel layout=vbox children={
 				new label caption="Third tab with an input field:"
-				new textinput placeholder="Type here..."
+				new textinput min_width=160 placeholder="Type here..."
 			}
 		}
 	}
@@ -343,7 +474,7 @@ new tab caption="Vertical Tabs" children={
 			}
 			new tab caption="Third" children={
 				new panel layout=vbox children={
-					new textinput placeholder="Type here..."
+					new textinput min_width=160 placeholder="Type here..."
 				}
 			}`)
 	for _, name := range []string{"Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth", "Eleventh", "Twelfth", "Thirteenth"} {
@@ -389,7 +520,7 @@ new tab caption="Vertical Tabs" children={
 
 det=new tab caption="Details" children={
 	dbox=new panel layout=vbox spacing=0 children={
-		dtree=new treeview caption="Name" showheader sorted sortedby=-1 editable stretch=1 align=fill children={
+		dtree=new treeview caption="Name" showheader sorted sortedby=-1 editable stretch=1 children={
 			dsizec=new column id=size caption="Size" width=10 align=right sortable sortproxy=4
 			dkindc=new column id=kind caption="Kind" width=14 sortable editable
 			dmodc=new column id=modified caption="Date Modified" width=24 sortable
@@ -430,11 +561,12 @@ det=new tab caption="Details" children={
 mtab=new tab caption="MDI Demo" children={
 	mdisp=new splitter orientation=vertical position=0.9 caption="Dock" children={
 		mdisa=new scrollarea children={
-			mdi=new mdipane fill="░" min_width=640 min_height=400 max_width=640 max_height=400 children={
+			mdi=new mdipane background_char="░" min_width=640 min_height=400 max_width=640 max_height=400 children={
 				mdicp=new panel layout=vbox spacing=8 children={
 					new label caption="MDIPane Trinket Demo"
 					new label caption="This MDIPane trinket manages floating windows.\nClick [_] to minimize windows to the dock below."
 					new button caption="Spawn Window in MDIPane" action=demo.mdi.spawn
+					new button caption="Spawn Bounded Window" action=demo.mdi.spawnbounded
 					new panel layout=hbox spacing=8 children={
 						new button caption="Tile" action=demo.mdi.tile
 						new button caption="Cascade" action=demo.mdi.cascade
@@ -454,19 +586,101 @@ mtab=new tab caption="MDI Demo" children={
 	}
 }
 
+mt=new tab caption="Terminal" children={
+	mtsp=new splitter orientation=vertical position=0.3 caption="Terminal" children={
+		mtp=new panel layout=vbox spacing=8 children={
+			new label caption="A terminal surface in a tab, the same trinket the Demo Window and each secondary application embed." wrap
+			new label caption="Keystrokes leave as input events and the application writes them to a PTY it owns; the child's output comes back through feed=. The shell starts the first time this tab is shown." wrap
+			mtrow=new panel layout=hbox spacing=8 children={
+				mtclear=new button caption="Clear"
+				new spacer
+			}
+		}
+		mterm=new terminal
+	}
+}
+
+df=new tab caption="Defaults" children={
+	dfsa=new scrollarea stretch=1 children={
+		dfv=new panel layout=vbox spacing=0 children={
+			new label halign=textbegin fill=none caption="One of each trinket, with nothing setting a size on any of them.\nWhat you see is what each one asks for when nobody tells it.\n\nA trinket that can size itself from its own content does: a button\nfrom its caption, a label from its text, a combo box from its items.\nOne that cannot falls back to three cells, which is meant to look\nwrong -- it is how a trinket says nobody gave it a size."
+
+			new label halign=textbegin fill=none caption="--- button"
+			new button halign=textbegin fill=none caption="Button"
+			new label halign=textbegin fill=none caption="--- checkbox"
+			new checkbox halign=textbegin fill=none caption="Checkbox"
+			new label halign=textbegin fill=none caption="--- radiobutton"
+			new radiobutton halign=textbegin fill=none caption="Radio button" group=dfgroup
+			new label halign=textbegin fill=none caption="--- label"
+			new label halign=textbegin fill=none caption="Label"
+			new label halign=textbegin fill=none caption="--- textinput"
+			new textinput halign=textbegin fill=none placeholder="Text input"
+			new label halign=textbegin fill=none caption="--- combobox"
+			new combobox halign=textbegin fill=none children={
+				new item caption="Combo item one"
+				new item caption="Combo item two"
+			}
+			new label halign=textbegin fill=none caption="--- progress"
+			new progress halign=textbegin fill=none value=60
+			new label halign=textbegin fill=none caption="--- separator"
+			new separator halign=textbegin fill=none caption="Separator"
+			new label halign=textbegin fill=none caption="--- spacer"
+			new spacer halign=textbegin fill=none
+			new label halign=textbegin fill=none caption="--- listview"
+			new listview halign=textbegin fill=none children={
+				new item caption="List item one"
+				new item caption="List item two"
+				new item caption="List item three"
+			}
+			new label halign=textbegin fill=none caption="--- treeview"
+			new treeview halign=textbegin fill=none children={
+				new item caption="Tree item" children={
+					new item caption="Tree child"
+				}
+			}
+			new label halign=textbegin fill=none caption="--- panel (no layout, bordered)"
+			new panel halign=textbegin fill=none border
+			new label halign=textbegin fill=none caption="--- scrollarea"
+			new scrollarea halign=textbegin fill=none children={
+				new label caption="Scroll area content"
+			}
+			new label halign=textbegin fill=none caption="--- splitter"
+			new splitter halign=textbegin fill=none orientation=vertical children={
+				new label caption="Splitter first"
+				new label caption="Splitter second"
+			}
+			new label halign=textbegin fill=none caption="--- tabs"
+			new tabs halign=textbegin fill=none children={
+				new tab caption="One" children={new label caption="Tab one"}
+				new tab caption="Two" children={new label caption="Tab two"}
+			}
+			new label halign=textbegin fill=none caption="--- editor"
+			new editor halign=textbegin fill=none
+			new label halign=textbegin fill=none caption="--- terminal"
+			new terminal halign=textbegin fill=none
+			new label halign=textbegin fill=none caption="--- dockrow"
+			new dockrow halign=textbegin fill=none
+			new label halign=textbegin fill=none caption="--- mdipane"
+			new mdipane halign=textbegin fill=none
+		}
+	}
+}
+
 }
 }
 
 # Surface what the app-side handlers address, then open the event flows
 # they listen to (command flows regardless; toggles/changes need a sub).
 tabs=w.t
+mterm=w.t.mt.mtsp.mterm
+mtclear=w.t.mt.mtsp.mtp.mtrow.mtclear
 dtree=w.t.det.dbox.dtree
 dsizec=w.t.det.dbox.dtree.dsizec
 dkindc=w.t.det.dbox.dtree.dkindc
 dmodc=w.t.det.dbox.dtree.dmodc
 dtagsc=w.t.det.dbox.dtree.dtagsc
 drawc=w.t.det.dbox.dtree.drawc
-kinds=new collection of=options children={
+kinds=new collection children={
 	new option key=png value="PNG image"
 	new option key=folder value="Folder"
 	new option key=arj value="ARJ Archive"
@@ -500,6 +714,15 @@ tfmb=w.t.tf.tfp.tfrow.tfr.tfmrow.tfmb
 tfms=w.t.tf.tfp.tfrow.tfr.tfmrow.tfms
 tfmh=w.t.tf.tfp.tfrow.tfr.tfmrow.tfmh
 tfmn=w.t.tf.tfp.tfrow.tfr.tfmrow.tfmn
+dnx=w.t.dn.dnp.dnrow.dnx
+dny=w.t.dn.dnp.dnrow.dny
+dnap=w.t.dn.dnp.dnrow.dnap
+dnd=w.t.dn.dnp.dnpre.dnd
+dnh=w.t.dn.dnp.dnpre.dnh
+dnt=w.t.dn.dnp.dnpre.dnt
+dns=w.t.dn.dnp.dnpre.dns
+dnn=w.t.dn.dnp.dnpre.dnn
+dnecho=w.t.dn.dnp.dnecho
 binput=w.t.b.bw.brow.input
 wfont=w.t.s.o.sp.c.wfont
 dfont=w.t.s.o.sp.c.dfont
@@ -513,6 +736,19 @@ sbggray=w.t.ss.sp.sa.sr.sbggray
 mdi=w.t.mtab.mdisp.mdisa.mdi
 mdistatus=w.t.mtab.mdisp.mdisa.mdi.mdicp.mdistatus
 mdidock=w.t.mtab.mdisp.mdidock
+lmid=w.t.lim.limv.limrun.lmid
+lfill=w.t.lim.limv.limcell.lfill
+lmaxnone=w.t.lim.limv.limg.limmaxrow.lmaxnone
+lmax200=w.t.lim.limv.limg.limmaxrow.lmax200
+lmax120=w.t.lim.limv.limg.limmaxrow.lmax120
+lmax40=w.t.lim.limv.limg.limmaxrow.lmax40
+lmax0=w.t.lim.limv.limg.limmaxrow.lmax0
+lmin0=w.t.lim.limv.limg.limminrow.lmin0
+lmin160=w.t.lim.limv.limg.limminrow.lmin160
+lhbegin=w.t.lim.limv.limalignrow.lhbegin
+lhcenter=w.t.lim.limv.limalignrow.lhcenter
+lhend=w.t.lim.limv.limalignrow.lhend
+lhfill=w.t.lim.limv.limalignrow.lhfill
 `)
 
 	// The menu bar and status bar are adopted as this application's
@@ -531,6 +767,7 @@ func mainMenuScript() string {
 mb=new menubar children={
 	new menu caption="&Demo" wellknown="app" children={
 		new menuitem caption="&New" shortcut="^N" action=demo.file.new
+		new menuitem caption="New &Bounded Window" action=demo.file.bounded
 		new menuitem caption="&Open..." shortcut="^O"
 		new menuitem caption="&Save" shortcut="^S"
 	}
@@ -655,7 +892,7 @@ pw=new window title="Protocol Demo" x=64 y=64 width=448 height=256 children={
 		pstatus=new label C="Interact below; events appear here."
 		new separator
 		cb=new checkbox C="Tri-state checkbox (watch the label above)" tristate
-		inp=new textinput placeholder="Type here..."
+		inp=new textinput min_width=160 placeholder="Type here..."
 		combo=new combobox children={new item C="Alpha"; new item C="Beta"; new item C="Gamma"} selected=0
 		btn=new button C="Dispatch demo.hello" action=demo.hello
 	}
@@ -675,7 +912,7 @@ dw%d=new window title="Demo Window" x=%d y=%d width=480 height=320 tearable chil
 	dsp=new splitter orientation=vertical position=0.3 caption="Terminal" children={
 		dtp=new panel layout=vbox spacing=8 children={
 			new label caption="This is a child window."
-			new textinput placeholder="Type something..."
+			new textinput min_width=160 placeholder="Type something..."
 			dclose=new button caption="Close"
 		}
 		dterm=new terminal
@@ -685,7 +922,30 @@ dwin=dw%d
 dcloser=dw%d.dsp.dtp.dclose
 dterm=dw%d.dsp.dterm
 set dterm feed="\e[1;36mThis banner arrived as protocol text.\e[0m\r\n\r\n"
-`, n, 40+n*16, 40+n*16, n, n, n)
+`, n, 40+n*16, 48+n*16, n, n, n)
+}
+
+// boundedWindowScript is a window that says how far it grows: maximizing it
+// takes what it may of the desktop and centers it there, and the room it
+// declined is filled rather than left as desktop showing through.
+//
+// Its maximum is larger than the size it opens at, so maximizing visibly does
+// something -- and smaller than the desktop, so there is something left over
+// to see.
+func boundedWindowScript(n int) string {
+	return fmt.Sprintf(`
+bw%d=new window title="Bounded Window" x=%d y=%d width=280 height=160 tearable max_width=480 max_height=320 children={
+	bwp=new panel layout=vbox spacing=8 children={
+		new label caption="max_width=480  max_height=320"
+		new label caption="Maximize me: double-click the title, or press [^]. I take the whole desktop as my surface and draw myself in the middle of it at the size I allow; the shaded room around me is mine, and is what I declined." wrap
+		new label caption="Tear me off and zoom and it is the same: the OS window fills the screen, and I draw myself in the middle of it with the shaded room around me." wrap
+		new spacer
+		bwclose=new button caption="Close"
+	}
+}
+bwin=bw%d
+bwcloser=bw%d.bwp.bwclose
+`, n, 56+n*16, 48+n*16, n, n)
 }
 
 // aboutDialogScript is the About message box. The name and version come from
@@ -706,7 +966,7 @@ w=new window title="App %d Window" x=%d y=%d width=480 height=320 tearable main 
 		tp=new panel layout=vbox spacing=8 children={
 			new label caption="This window belongs to Application #%d"
 			new label caption="Notice the menu bar and status bar change\nwhen this window is focused."
-			new textinput placeholder="Enter text here..."
+			new textinput min_width=160 placeholder="Enter text here..."
 			closebtn=new button caption="Close Window"
 		}
 		term=new terminal
@@ -740,7 +1000,7 @@ func mdiChildScript(n int) string {
 set mdi children={d%d=new window title="Document %d" x=%d y=%d width=240 height=128 children={
 	p=new panel layout=vbox spacing=8 children={
 		new label caption="Document #%d"
-		new textinput placeholder="Enter document content..."
+		new textinput min_width=160 placeholder="Enter document content..."
 		bp=new panel layout=hbox spacing=8 children={
 			nb=new button caption="New"
 			cl=new button caption="Close"
@@ -751,6 +1011,26 @@ wwin=mdi.d%d
 wnew=mdi.d%d.p.bp.nb
 wclose=mdi.d%d.p.bp.cl
 `, n, n, (offset*2+1)*8, (offset+1)*16, n, n, n, n)
+}
+
+// mdiBoundedChildScript spawns a document window that says how far it grows,
+// so the pane's own filler is visible: maximize it and it centers in the pane
+// with the shaded room around it, exactly as one does on the desktop.
+func mdiBoundedChildScript(n int) string {
+	offset := (n - 1) % 5
+	return fmt.Sprintf(`
+set mdi children={b%d=new window title="Bounded %d" x=%d y=%d width=200 height=112 max_width=320 max_height=200 children={
+	p=new panel layout=vbox spacing=8 children={
+		new label caption="max 320x200" 
+		new label caption="Double-click my title." wrap
+		bp=new panel layout=hbox spacing=8 children={
+			cl=new button caption="Close"
+		}
+	}
+}}
+bwwin=mdi.b%d
+bwclose=mdi.b%d.p.bp.cl
+`, n, n, (offset*2+3)*8, (offset+2)*16, n, n)
 }
 
 // detailsValuesScript fills the Details tab's cell values column-major

@@ -38,7 +38,20 @@ func NewProgressBar() *ProgressBar {
 	p.Init(p)
 	p.SetFocusPolicy(core.NoFocus)
 	p.SetAccessibleRole(core.RoleProgressBar)
+	p.applyOrientationPolicy()
 	return p
+}
+
+// applyOrientationPolicy fixes the axis a bar does not grow along: a horizontal
+// bar is one line of text tall and cannot be more, however deep the row it is
+// put in, while it takes whatever width it is given. A vertical one is the same
+// the other way round -- two cells across, growing down the page.
+func (p *ProgressBar) applyOrientationPolicy() {
+	if p.orientation == core.Horizontal {
+		p.SetSizePolicy(core.NewSizePolicy(core.SizePreferred, core.SizeFixed))
+		return
+	}
+	p.SetSizePolicy(core.NewSizePolicy(core.SizeFixed, core.SizePreferred))
 }
 
 // Value returns the current value.
@@ -110,6 +123,7 @@ func (p *ProgressBar) Orientation() core.Orientation {
 // SetOrientation sets the orientation.
 func (p *ProgressBar) SetOrientation(orientation core.Orientation) {
 	p.orientation = orientation
+	p.applyOrientationPolicy()
 	p.Update()
 }
 
@@ -168,13 +182,13 @@ func (p *ProgressBar) Advance(amount int) {
 	p.SetValue(p.value + amount)
 }
 
-// SizeHint returns the preferred size.
+// SizeHint returns the preferred size. A horizontal bar's width is the
+// fallback for when nothing sets one (see defaultSizeCells).
 func (p *ProgressBar) SizeHint() core.UnitSize {
 	metrics := p.EffectiveCellMetrics()
-	// ProgressBar draws block characters (░▓), not text - use cell-based sizing
 	if p.orientation == core.Horizontal {
 		return core.UnitSize{
-			Width:  metrics.TextWidth(20), // 20 cells wide
+			Width:  metrics.UnitsPerCellWidth * defaultSizeCells,
 			Height: metrics.TextHeight(1),
 		}
 	}
@@ -218,7 +232,7 @@ func (p *ProgressBar) paintHorizontal(painter *core.Painter, bounds core.UnitRec
 
 	// Draw incomplete background first
 	for i := 0; i < metrics.CharsForWidth(bounds.Width); i++ {
-		x := core.Unit(i) * metrics.CellWidth
+		x := core.Unit(i) * metrics.UnitsPerCellWidth
 		painter.DrawCell(x, 0, '░', incompleteStyle)
 	}
 
@@ -231,7 +245,7 @@ func (p *ProgressBar) paintHorizontal(painter *core.Painter, bounds core.UnitRec
 		blockSize := 5
 		pos := indeterminateSweepPos(totalCells, blockSize)
 		for i := 0; i < blockSize && pos+i < totalCells; i++ {
-			x := core.Unit(pos+i) * metrics.CellWidth
+			x := core.Unit(pos+i) * metrics.UnitsPerCellWidth
 			painter.DrawCell(x, 0, '▓', completedStyle)
 		}
 	} else {
@@ -240,7 +254,7 @@ func (p *ProgressBar) paintHorizontal(painter *core.Painter, bounds core.UnitRec
 
 		// Draw filled portion
 		for i := 0; i < filledCells; i++ {
-			x := core.Unit(i) * metrics.CellWidth
+			x := core.Unit(i) * metrics.UnitsPerCellWidth
 			painter.DrawCell(x, 0, '▓', completedStyle)
 		}
 	}
@@ -260,7 +274,7 @@ func (p *ProgressBar) paintHorizontal(painter *core.Painter, bounds core.UnitRec
 
 		filledCells := totalCells * p.Percentage() / 100
 		for i, ch := range text {
-			x := core.Unit(startX+i) * metrics.CellWidth
+			x := core.Unit(startX+i) * metrics.UnitsPerCellWidth
 			// Use appropriate style based on position
 			var s style.CellStyle
 			if startX+i < filledCells {
@@ -278,15 +292,15 @@ func (p *ProgressBar) paintVertical(painter *core.Painter, bounds core.UnitRect,
 	completedStyle := scheme.GetProgressFull()
 	incompleteStyle := scheme.GetProgressEmpty()
 
-	totalCells := int(bounds.Height / metrics.CellHeight)
+	totalCells := int(bounds.Height / metrics.UnitsPerCellHeight)
 
 	// Draw incomplete background first (entire bar)
 	for i := 0; i < totalCells; i++ {
-		y := core.Unit(i) * metrics.CellHeight
+		y := core.Unit(i) * metrics.UnitsPerCellHeight
 		painter.FillRect(core.UnitRect{
 			Y:      y,
 			Width:  bounds.Width,
-			Height: metrics.CellHeight,
+			Height: metrics.UnitsPerCellHeight,
 		}, '░', incompleteStyle)
 	}
 
@@ -295,11 +309,11 @@ func (p *ProgressBar) paintVertical(painter *core.Painter, bounds core.UnitRect,
 
 	// Draw filled portion from bottom
 	for i := 0; i < filledCells; i++ {
-		y := bounds.Height - core.Unit(i+1)*metrics.CellHeight
+		y := bounds.Height - core.Unit(i+1)*metrics.UnitsPerCellHeight
 		painter.FillRect(core.UnitRect{
 			Y:      y,
 			Width:  bounds.Width,
-			Height: metrics.CellHeight,
+			Height: metrics.UnitsPerCellHeight,
 		}, '▓', completedStyle)
 	}
 }

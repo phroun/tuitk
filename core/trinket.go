@@ -366,9 +366,20 @@ type TrinketBase struct {
 	sizePolicy SizePolicyPair
 	margins    UnitMargins
 
-	layoutStretch  int
-	layoutAlign    Alignment
-	layoutAlignSet bool
+	layoutStretch    int
+	layoutStretchSet bool
+	layoutAlign      Alignment
+	layoutAlignSet   bool
+
+	// Hints one layout manager each reads; see layouthints.go.
+	gridPlacement    GridPlacement
+	gridPlacementSet bool
+	flexHints        FlexHints
+	flexHintsSet     bool
+
+	// direction is the side text begins on for this trinket and everything
+	// below it. DirInherit -- the zero value -- takes it from the ancestors.
+	direction Direction
 
 	visible bool
 	enabled bool
@@ -395,7 +406,7 @@ func NewTrinketBase() *TrinketBase {
 		focusPolicy: NoFocus,
 		scheme:      style.SchemeInherit, // -1 = inherit from container
 		sizePolicy:  NewSizePolicy(SizePreferred, SizePreferred),
-		maxSize:     UnitSize{Width: 1<<30 - 1, Height: 1<<30 - 1},
+		maxSize:     UnitSize{Width: Unbounded, Height: Unbounded},
 	}
 }
 
@@ -603,11 +614,24 @@ func (w *TrinketBase) LayoutStretch() int {
 	return w.layoutStretch
 }
 
+// LayoutStretchHint returns the stretch factor and whether one was stated.
+//
+// The flag is what tells a stretch of zero -- "take none of the leftover" --
+// from one nobody wrote, which is the same distinction FlexHints.ShrinkSet
+// makes and for the same reason: without it a child could be given a stretch
+// but never have it taken away again.
+func (w *TrinketBase) LayoutStretchHint() (int, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.layoutStretch, w.layoutStretchSet
+}
+
 // SetLayoutStretch sets the stretch factor hint.
 func (w *TrinketBase) SetLayoutStretch(stretch int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.layoutStretch = stretch
+	w.layoutStretchSet = true
 }
 
 // LayoutAlignment returns the trinket's alignment hint and whether one
@@ -624,6 +648,27 @@ func (w *TrinketBase) SetLayoutAlignment(a Alignment) {
 	defer w.mu.Unlock()
 	w.layoutAlign = a
 	w.layoutAlignSet = true
+}
+
+// Direction returns the direction named on this trinket, or DirInherit to
+// take it from the parent chain. See FindEffectiveDirection.
+func (w *TrinketBase) Direction() Direction {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.direction
+}
+
+// SetDirection names the side text begins on for this trinket and everything
+// below it; DirInherit hands the question back to the ancestors.
+//
+// Everything under it is placed against this, so the tree below repaints.
+func (w *TrinketBase) SetDirection(d Direction) {
+	w.mu.Lock()
+	w.direction = d
+	w.needsRepaint = true
+	w.mu.Unlock()
+
+	w.notifyAncestorsOfRepaint()
 }
 
 // Margins returns the margins.
@@ -906,10 +951,12 @@ func (p *scrollRectProxy) Pos() UnitPoint      { return UnitPoint{X: p.rect.X, Y
 func (p *scrollRectProxy) Size() UnitSize {
 	return UnitSize{Width: p.rect.Width, Height: p.rect.Height}
 }
-func (p *scrollRectProxy) SetPos(UnitPoint)                {}
-func (p *scrollRectProxy) SetSize(UnitSize)                {}
-func (p *scrollRectProxy) MinimumSize() UnitSize           { return UnitSize{} }
-func (p *scrollRectProxy) MaximumSize() UnitSize           { return UnitSize{} }
+func (p *scrollRectProxy) SetPos(UnitPoint)      {}
+func (p *scrollRectProxy) SetSize(UnitSize)      {}
+func (p *scrollRectProxy) MinimumSize() UnitSize { return UnitSize{} }
+func (p *scrollRectProxy) MaximumSize() UnitSize {
+	return UnitSize{Width: Unbounded, Height: Unbounded}
+}
 func (p *scrollRectProxy) SetMinimumSize(UnitSize)         {}
 func (p *scrollRectProxy) SetMaximumSize(UnitSize)         {}
 func (p *scrollRectProxy) SizeHint() UnitSize              { return p.Size() }
@@ -1111,6 +1158,15 @@ func (w *TrinketBase) SetCellMetrics(m *CellMetrics) {
 		parent.Layout()
 	}
 	w.Update()
+}
+
+// MeasureText measures text in THIS trinket's denomination -- how many of
+// its units the text occupies. A trinket laying itself out against text it
+// will paint wants this rather than Font.MeasureText, which answers at the
+// default denomination and is therefore only correct for a subtree that
+// carries no override.
+func (w *TrinketBase) MeasureText(text string) Unit {
+	return w.EffectiveFont().MeasureTextIn(text, w.EffectiveCellMetrics())
 }
 
 // EffectiveCellMetrics returns the grid metrics to use for this trinket.

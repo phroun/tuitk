@@ -133,7 +133,10 @@ func NewTextInput() *TextInput {
 	)
 	t.Init(t) // Enable polymorphic focus handling
 	t.SetFocusPolicy(core.StrongFocus)
-	t.SetAccessibleRole(core.RoleTextInput)
+	// One line of text tall, and it cannot be more: given a row three deep it
+	// sits in it rather than stretching to it. Across is another matter -- a
+	// field is meant to take the width it is given.
+	t.SetSizePolicy(core.NewSizePolicy(core.SizePreferred, core.SizeFixed))
 	return t
 }
 
@@ -492,7 +495,6 @@ func (t *TextInput) textChanged() {
 // ensureCursorVisible scrolls to make the cursor visible.
 func (t *TextInput) ensureCursorVisible() {
 	bounds := t.Bounds()
-	font := t.EffectiveFont()
 	metrics := t.EffectiveCellMetrics()
 
 	if bounds.Width <= 0 {
@@ -517,9 +519,9 @@ func (t *TextInput) ensureCursorVisible() {
 	// Mid-text, keep the character the caret sits on visible.
 	var cursorWidth core.Unit
 	if caret < len(displayText) {
-		cursorWidth = font.MeasureText(string(displayText[caret]))
+		cursorWidth = t.MeasureText(string(displayText[caret]))
 	} else {
-		cursorWidth = metrics.CellWidth / 4
+		cursorWidth = metrics.UnitsPerCellWidth / 4
 		if cursorWidth < 1 {
 			cursorWidth = 1
 		}
@@ -536,7 +538,7 @@ func (t *TextInput) ensureCursorVisible() {
 			break
 		}
 		visibleText := string(displayText[start:end])
-		textWidth := font.MeasureText(visibleText)
+		textWidth := t.MeasureText(visibleText)
 
 		// Need room for text before cursor PLUS the cursor character itself
 		if textWidth+cursorWidth <= bounds.Width {
@@ -548,11 +550,14 @@ func (t *TextInput) ensureCursorVisible() {
 }
 
 // SizeHint returns the preferred size.
+// textInputWidthUnits is the width a field asks for when nothing sets one,
+// in units.
+// SizeHint returns the preferred size: the fallback width for when nothing
+// sets one (see defaultSizeCells), and one row.
 func (t *TextInput) SizeHint() core.UnitSize {
 	metrics := t.EffectiveCellMetrics()
-	// TextInput has a fixed size in units (160 wide x 16 tall) - does not scale with font
 	return core.UnitSize{
-		Width:  metrics.TextWidth(20),
+		Width:  metrics.UnitsPerCellWidth * defaultSizeCells,
 		Height: metrics.TextHeight(1),
 	}
 }
@@ -569,6 +574,12 @@ func (t *TextInput) Paint(p *core.Painter) {
 	scheme := t.GetScheme()
 	focused := t.HasFocus()
 	font := t.EffectiveFont()
+
+	// A field is one line of text tall, and a line is one grid row. The
+	// device-pixel fills below (highlight, block caret, bar caret) span that
+	// row, measured end to end so they land on the same device grid the
+	// glyphs beside them paint on.
+	rowHPx := p.UnitSpanPxY(0, t.EffectiveCellMetrics().UnitsPerCellHeight)
 
 	// Get inherited background color to determine pane type
 	inheritedBg := t.EffectiveBackgroundColor()
@@ -692,6 +703,18 @@ func (t *TextInput) Paint(p *core.Painter) {
 	// advance is a fraction of a unit - a space beside CJK text is about two
 	// and a half - where the caret after a second space landed short of the
 	// space it was meant to follow.
+	//
+	// Where the painter cannot measure in pixels, the fallback maps the LOCAL
+	// width onto the device grid. UnitsToPx cannot: it converts from the
+	// default denomination, so inside a re-denominated interior it answers for
+	// a different unit than the one MeasureText counted -- the same run came
+	// out 15px at 4x8 and 58px at 16x32 where the truth was 29px throughout.
+	runPx := func(run string, w core.Unit) int {
+		if px, ok := p.MeasureTextPx(run, font); ok {
+			return px
+		}
+		return p.UnitSpanPxX(0, w)
+	}
 	prefixWidth := func(d int) (core.Unit, int) {
 		if d < 0 {
 			d = 0
@@ -700,11 +723,8 @@ func (t *TextInput) Paint(p *core.Painter) {
 			d = n
 		}
 		run := string(displayText[:d])
-		w := font.MeasureText(run)
-		if px, ok := p.MeasureTextPx(run, font); ok {
-			return w, px
-		}
-		return w, p.UnitsToPx(w)
+		w := t.MeasureText(run)
+		return w, runPx(run, w)
 	}
 
 	// Selection span (display indices) and the fixed anchor - the selection
@@ -767,7 +787,7 @@ func (t *TextInput) Paint(p *core.Painter) {
 			}
 		}
 		if usePx {
-			p.FillRectPixels(0, 0, loPx, 0, hiPx-loPx, p.UnitsToPx(font.LineHeight()), selStyle)
+			p.FillRectPixels(0, 0, loPx, 0, hiPx-loPx, rowHPx, selStyle)
 			selFg := selStyle.WithBg(style.ColorTransparent) // glyphs over the highlight
 			p.DrawTextOffsetClipped(0, 0, 0, loPx, hiPx, string(displayText), selFg, font)
 		} else {
@@ -825,8 +845,7 @@ func (t *TextInput) Paint(p *core.Painter) {
 			if thin < 1 {
 				thin = 1
 			}
-			lineH := p.UnitsToPx(font.LineHeight())
-			ruleY := lineH - thin
+			ruleY := rowHPx - thin
 			if ruleY < 0 {
 				ruleY = 0
 			}
@@ -920,9 +939,9 @@ func (t *TextInput) Paint(p *core.Painter) {
 				// same pixel advance the text was laid out at.
 				endX, endPx := prefixWidth(cursorDisp + 1)
 				if cursorDisp >= n {
-					blank := font.MeasureText(" ")
+					blank := t.MeasureText(" ")
 					endX = caretX + blank
-					endPx = caretXPx + p.UnitsToPx(blank)
+					endPx = caretXPx + runPx(" ", blank)
 				}
 				// The caret is always at one EDGE of a selection (the span
 				// runs anchor to cursor), so the block covers a SELECTED
@@ -932,7 +951,7 @@ func (t *TextInput) Paint(p *core.Painter) {
 				block := blockCaretStyle(s, selStyle, fillStyle.Bg, overSel)
 				if usePx {
 					p.FillRectPixels(0, 0, caretXPx, 0, endPx-caretXPx,
-						p.UnitsToPx(font.LineHeight()), block)
+						rowHPx, block)
 					p.DrawTextOffsetClipped(0, 0, 0, caretXPx, endPx,
 						string(displayText), block.WithBg(style.ColorTransparent), font)
 				} else {
@@ -949,11 +968,11 @@ func (t *TextInput) Paint(p *core.Painter) {
 					// glyphs painted at, so it sits exactly on the boundary
 					// before the cursor's character.
 					drawn = p.FillRectPixels(0, 0, caretXPx, 0,
-						p.DeviceScale(), p.UnitsToPx(font.LineHeight()), barStyle)
+						p.DeviceScale(), rowHPx, barStyle)
 				}
 				if !drawn {
 					// Cell surfaces fall back to the reverse-video block.
-					if !p.DrawCaret(caretX, 0, font.LineHeight(), barStyle) {
+					if !p.DrawCaret(caretX, 0, t.EffectiveCellMetrics().UnitsPerCellHeight, barStyle) {
 						// The character under the block comes from the run
 						// actually on screen. Indexing the COMMITTED text
 						// by cursorPos agreed with this for as long as the
@@ -1165,7 +1184,7 @@ func (t *TextInput) truncateToWidth(text []rune, maxWidth core.Unit, font *core.
 	result := make([]rune, 0, len(text))
 	var totalWidth core.Unit
 	for _, r := range text {
-		charWidth := font.MeasureText(string(r))
+		charWidth := t.MeasureText(string(r))
 		if totalWidth+charWidth > maxWidth {
 			break
 		}
@@ -1175,7 +1194,14 @@ func (t *TextInput) truncateToWidth(text []rune, maxWidth core.Unit, font *core.
 	return string(result)
 }
 
-// findCharAtX finds the character index at the given X position using font metrics.
+// findCharAtX finds the character index at the given X position using font
+// metrics.
+//
+// x arrives in this field's own denomination, so the prefixes it is compared
+// against have to be measured in that same denomination. Font.MeasureText
+// answers at the DEFAULT one, so inside a re-denominated window a click
+// resolved against prefixes of the wrong size and the caret landed several
+// characters from the pointer.
 func (t *TextInput) findCharAtX(x core.Unit, font *core.Font) int {
 	displayText := t.getDisplayText()
 	if t.scrollOffset > 0 && t.scrollOffset < len(displayText) {
@@ -1194,7 +1220,7 @@ func (t *TextInput) findCharAtX(x core.Unit, font *core.Font) int {
 	// anyway.
 	var before core.Unit
 	for i := range displayText {
-		after := font.MeasureText(string(displayText[:i+1]))
+		after := t.MeasureText(string(displayText[:i+1]))
 		// The nearer edge wins: past the middle of a character is the position
 		// after it.
 		if x < (before+after)/2 {
@@ -1542,7 +1568,7 @@ func (t *TextInput) autoScrollStep() {
 // so a far overshoot stays controllable.
 func (t *TextInput) autoScrollSpeed() int {
 	speed := 1
-	if cw := t.EffectiveCellMetrics().CellWidth; cw > 0 {
+	if cw := t.EffectiveCellMetrics().UnitsPerCellWidth; cw > 0 {
 		speed += int(t.scrollOverX / cw)
 	}
 	if speed > 12 {
@@ -1926,15 +1952,18 @@ func (t *TextInput) showContextMenu(event core.MousePressEvent) {
 		return
 	}
 	items := t.contextMenuItems()
+	// The same menu PurfecTerm opens, measured by the same function.
+	lay := termMenuLayoutFrom(core.FindGraphicalFrames(t), t.EffectiveFont(),
+		termMenuScreenMetrics(pc), items)
 	height := core.Unit(0)
 	for _, it := range items {
 		if it.separator {
-			height += 4
+			height += lay.sepH
 		} else {
-			height += gfxMenuItemHeight
+			height += lay.rowH
 		}
 	}
-	height += 4 // padding
+	height += 2 * lay.padTop
 	// Screen placement: an embedded input maps through its HOST (its
 	// own parentless bounds mean nothing to the controller).
 	local := core.UnitPoint{X: event.X, Y: event.Y}
@@ -1947,21 +1976,22 @@ func (t *TextInput) showContextMenu(event core.MousePressEvent) {
 	}
 	at := pc.MapToScreen(target, local)
 	screen := pc.ScreenBounds()
-	if at.X+gfxMenuWidth > screen.X+screen.Width {
-		at.X = screen.X + screen.Width - gfxMenuWidth
+	if at.X+lay.width > screen.X+screen.Width {
+		at.X = screen.X + screen.Width - lay.width
 	}
 	if at.Y+height > screen.Y+screen.Height {
 		at.Y = screen.Y + screen.Height - height
 	}
-	menuBounds := core.UnitRect{X: at.X, Y: at.Y, Width: gfxMenuWidth, Height: height}
+	menuBounds := gridPopupRect(t.Self(), termMenuScreenMetrics(pc),
+		core.UnitRect{X: at.X, Y: at.Y, Width: lay.width, Height: height})
 	t.menuHover = -1
 
 	itemAt := func(y core.Unit) int {
-		pos := core.Unit(2)
+		pos := lay.padTop
 		for i, it := range items {
-			h := gfxMenuItemHeight
+			h := lay.rowH
 			if it.separator {
-				h = 4
+				h = lay.sepH
 			}
 			if y >= pos && y < pos+h {
 				if it.separator {
@@ -1987,12 +2017,11 @@ func (t *TextInput) showContextMenu(event core.MousePressEvent) {
 				lineStyle := style.DefaultStyle().WithBg(t.GetScheme().GetMenuSeparator().Fg)
 				paintPopupOuterStroke(p, menuBounds, p.DeviceScale(), lineStyle, 0, 0, false)
 			}
-			pos := menuBounds.Y + 2
+			pos := menuBounds.Y + lay.padTop
 			for i, it := range items {
 				if it.separator {
-					p.FillRect(core.UnitRect{X: menuBounds.X + 4, Y: pos + 2, Width: menuBounds.Width - 8, Height: 1}, ' ',
-						style.DefaultStyle().WithBg(style.RGB(200, 200, 200)))
-					pos += 4
+					paintTermMenuSeparator(p, menuBounds, pos, lay)
+					pos += lay.sepH
 					continue
 				}
 				st := bg
@@ -2000,14 +2029,14 @@ func (t *TextInput) showContextMenu(event core.MousePressEvent) {
 					st = bg.WithFg(style.RGB(150, 150, 150))
 				} else if i == t.menuHover {
 					st = hover
-					p.FillRect(core.UnitRect{X: menuBounds.X, Y: pos, Width: menuBounds.Width, Height: gfxMenuItemHeight}, ' ', st)
+					p.FillRect(core.UnitRect{X: menuBounds.X, Y: pos, Width: menuBounds.Width, Height: lay.rowH}, ' ', st)
 				}
 				// Explicit bg: transparent resolves to the terminal's dark
 				// default on the text backend (dark boxes behind the labels);
 				// the explicit bg equals the fill/hover color, so the
 				// graphical look is unchanged.
-				p.DrawText(menuBounds.X+8, pos, it.label, st, nil)
-				pos += gfxMenuItemHeight
+				p.DrawText(menuBounds.X+lay.indent, pos+lay.yOff, termMenuLabel(it), st, lay.font)
+				pos += lay.rowH
 			}
 		},
 		HandleMouseMove: func(event core.MouseMoveEvent) bool {

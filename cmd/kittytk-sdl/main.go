@@ -141,6 +141,19 @@ func main() {
 	// regardless — a terminal cannot subdivide a character cell.
 	core.SetTitleBarScale(cfg.TitleBarScale)
 
+	// [window] menu_scale: the menu bar, its dropdowns and context menus at
+	// this fraction of the classic full-cell row, fonts and cell-based
+	// gutters scaled to match. Quantizes and stands down on the TUI host for
+	// the same reasons.
+	core.SetMenuScale(cfg.MenuScale)
+
+	// [window] shortcut_scale sizes a menu's shortcut column against the item
+	// text, and shortcut_native_scale takes Apple's face down again on top of
+	// it in native mode. They compound: 0.8 and 0.8 put a native shortcut at
+	// 0.64 of the body.
+	core.SetShortcutScale(cfg.ShortcutScale)
+	core.SetShortcutNativeScale(cfg.ShortcutNativeScale)
+
 	backend, err := plat.EnsureBackend()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/phroun/kittytk/client"
 	"github.com/phroun/kittytk/protocol"
@@ -116,6 +118,156 @@ func (a *app) wireMainWindow() {
 	ui.Object("tfms").On("toggle", setMask(`echo=password mask="*"`))
 	ui.Object("tfmh").On("toggle", setMask(`echo=password mask="#"`))
 	ui.Object("tfmn").On("toggle", setMask(`echo=normal`))
+
+	a.wireDenomination(win)
+	a.wireLimits()
+	a.wireTerminalTab(tabs)
+}
+
+// wireLimits drives the Limits tab: the two bounds a trinket may carry, and
+// what a layout does when they bite.
+//
+// The middle box of the run takes a maximum and a minimum, so the maximum can
+// be watched stopping it -- and then watched losing to a minimum that
+// contradicts it. The capped button below shows the other half: a maximum
+// stops it filling its cell, and where it stops short its alignment places it.
+func (a *app) wireLimits() {
+	ui := a.ui
+	mid := ui.Object("lmid")
+	capped := ui.Object("lfill")
+
+	// Written as raw toggle events, the way the other radio groups here are:
+	// a group reports every button that changed, so each handler acts only on
+	// the one that came on.
+	set := func(target client.Handle, arg string) func(*protocol.Event) {
+		return func(ev *protocol.Event) {
+			if ev.Flag("checked") == protocol.FlagTrue {
+				_ = target.Set(arg)
+			}
+		}
+	}
+
+	ui.Object("lmaxnone").On("toggle", set(mid, "max_width=-1"))
+	ui.Object("lmax200").On("toggle", set(mid, "max_width=200"))
+	ui.Object("lmax120").On("toggle", set(mid, "max_width=120"))
+	ui.Object("lmax40").On("toggle", set(mid, "max_width=40"))
+	ui.Object("lmax0").On("toggle", set(mid, "max_width=0"))
+
+	ui.Object("lmin0").On("toggle", set(mid, "min_width=0"))
+	ui.Object("lmin160").On("toggle", set(mid, "min_width=160"))
+
+	ui.Object("lhbegin").On("toggle", set(capped, "halign=textbegin"))
+	ui.Object("lhcenter").On("toggle", set(capped, "halign=center"))
+	ui.Object("lhend").On("toggle", set(capped, "halign=textend"))
+
+	// Filling is what the maximum interrupts, so it is worth turning off to
+	// see that the two arrive at the same placement.
+	ui.Checkbox("lhfill").OnToggle(func(s protocol.FlagState) {
+		if s == protocol.FlagTrue {
+			_ = capped.Set("fill=both")
+			return
+		}
+		_ = capped.Set("fill=none")
+	})
+}
+
+// terminalTabIndex is the Terminal tab's position in the main window's
+// strip. The change event reports an index, so the tab has to be named by
+// one; a test checks the caption at this index is still "Terminal".
+const terminalTabIndex = 15
+
+// wireTerminalTab drives the Terminal tab's surface. The PTY starts the
+// first time the tab is selected rather than at build: a shell is a child
+// process, and a tab nobody opened should not have one.
+func (a *app) wireTerminalTab(tabs client.Handle) {
+	ui := a.ui
+	term := ui.Object("mterm")
+
+	// ESC [ 2 J clears the screen, ESC [ H puts the cursor home -- fed in
+	// as if the child had written them, which is the only direction the
+	// display accepts.
+	ui.Button("mtclear").OnClick(func() {
+		_ = term.Set(`feed="\e[2J\e[H"`)
+	})
+
+	tabs.On("change", func(ev *protocol.Event) {
+		if i, ok := ev.Int("selected"); !ok || i != terminalTabIndex {
+			return
+		}
+		if a.terminalStarted {
+			return
+		}
+		a.terminalStarted = true
+		a.wireTerminal(term)
+	})
+}
+
+// What the Denomination tab will apply. One unit per cell is the floor
+// because the cell conversions divide by it -- UnitsToCellX and its row
+// counterpart -- so zero is not a small denomination, it is a division by
+// zero. The ceiling is a demo's own limit rather than the model's.
+const (
+	denomMin = 1
+	denomMax = 64
+)
+
+// wireDenomination drives the window's own column_units and row_units --
+// the per-axis D8 spelling, which is what makes X and Y independent. The
+// Selection tab's grid checkbox reaches the same machinery through the
+// window's denomination property, but that one sets the row height alone
+// and resets the column to its default.
+func (a *app) wireDenomination(win client.Handle) {
+	ui := a.ui
+	echo := ui.Object("dnecho")
+	x := ui.TextInput("dnx")
+	y := ui.TextInput("dny")
+
+	say := func(s string) {
+		_ = echo.Set("caption=" + protocol.Quote(s))
+		a.setStatus(s)
+	}
+
+	// apply reads both fields, so pressing Return in either one commits
+	// the pair the person can see rather than half of it.
+	apply := func() {
+		cx, errX := strconv.Atoi(strings.TrimSpace(x.Text()))
+		cy, errY := strconv.Atoi(strings.TrimSpace(y.Text()))
+		switch {
+		case errX != nil || errY != nil:
+			say("Denomination: X and Y must both be whole numbers.")
+			return
+		case cx < denomMin || cx > denomMax || cy < denomMin || cy > denomMax:
+			say(fmt.Sprintf("Denomination: %d x %d is out of range (%d to %d).",
+				cx, cy, denomMin, denomMax))
+			return
+		}
+		if err := win.Set(fmt.Sprintf("column_units=%d row_units=%d", cx, cy)); err != nil {
+			say("Denomination: " + err.Error())
+			return
+		}
+		say(fmt.Sprintf("Denomination is now %d x %d.", cx, cy))
+	}
+
+	// Return in either field applies, which is what complete is for: the
+	// person saying they are done with the value, not every keystroke.
+	x.OnComplete(func(string) { apply() })
+	y.OnComplete(func(string) { apply() })
+	ui.Button("dnap").OnClick(apply)
+
+	// A preset fills the fields as well as applying, so the two never
+	// disagree about what the window is showing.
+	preset := func(cx, cy int) func() {
+		return func() {
+			_ = x.SetText(strconv.Itoa(cx))
+			_ = y.SetText(strconv.Itoa(cy))
+			apply()
+		}
+	}
+	ui.Button("dnd").OnClick(preset(8, 16))
+	ui.Button("dnh").OnClick(preset(4, 8))
+	ui.Button("dnt").OnClick(preset(16, 32))
+	ui.Button("dns").OnClick(preset(16, 16))
+	ui.Button("dnn").OnClick(preset(8, 32))
 }
 
 // wireMenus registers the primary application's command handlers. The
@@ -126,6 +278,7 @@ func (a *app) wireMenus() {
 
 	// Demo menu.
 	c.OnCommand("demo.file.new", func() { a.openTerminalWindow() })
+	c.OnCommand("demo.file.bounded", func() { a.openBoundedWindow() })
 
 	// Edit menu: Cut/Copy/Paste/Select All are supplied by the host's
 	// system Edit menu and act on the focused trinket directly; the client
@@ -170,6 +323,7 @@ func (a *app) wireMDI() {
 	status := ui.Label("mdistatus")
 
 	c.OnCommand("demo.mdi.spawn", func() { a.spawnMDIChild() })
+	c.OnCommand("demo.mdi.spawnbounded", func() { a.spawnBoundedMDIChild() })
 	c.OnCommand("demo.mdi.tile", func() { _ = mdi.Set("tile") })
 	c.OnCommand("demo.mdi.cascade", func() { _ = mdi.Set("cascade") })
 	c.OnCommand("demo.mdi.next", func() { _ = mdi.Set("next") })
@@ -239,6 +393,34 @@ func (a *app) spawnMDIChild() {
 	ui.Button("wclose").OnClick(func() {
 		_ = a.ui.Object("mdi").Set(fmt.Sprintf("remove=%d", winID))
 	})
+}
+
+// spawnBoundedMDIChild spawns a child that says how far it grows, so the
+// pane's filler has something to surround: maximize it and it centers in the
+// pane with the shaded room around it.
+func (a *app) spawnBoundedMDIChild() {
+	a.mdiCount++
+	ui, err := a.conn.Build(mdiBoundedChildScript(a.mdiCount))
+	if err != nil {
+		return
+	}
+	winID := ui.ID("bwwin")
+	ui.Button("bwclose").OnClick(func() {
+		_ = a.ui.Object("mdi").Set(fmt.Sprintf("remove=%d", winID))
+	})
+}
+
+// openBoundedWindow builds a desktop window that says how far it grows: the
+// same behaviour one level up, where the room it declines is the desktop's.
+func (a *app) openBoundedWindow() {
+	a.mdiCount++ // reuse the counter for a unique key and offset per window
+	n := a.mdiCount
+	ui, err := a.conn.Build(boundedWindowScript(n))
+	if err != nil {
+		return
+	}
+	win := ui.Window("bwin")
+	ui.Button("bwcloser").OnClick(func() { _ = win.Close() })
 }
 
 // openProtocolWindow builds the companion window whose content is all

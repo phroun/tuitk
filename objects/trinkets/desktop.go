@@ -638,8 +638,8 @@ func (d *Desktop) showEventViewer() {
 	// axis, which on a small desktop is what actually decides the size.
 	metrics := d.EffectiveCellMetrics()
 	area := wm.ClientArea()
-	w := metrics.CellWidth * 96
-	h := metrics.CellHeight * 24
+	w := metrics.UnitsPerCellWidth * 96
+	h := metrics.UnitsPerCellHeight * 24
 	// Each axis capped only when the desktop's size on it is actually known -
 	// a client area not established yet reads as zero, and capping to that
 	// would open the viewer with no size at all.
@@ -1681,7 +1681,7 @@ func (d *Desktop) ExitSoloMode() {
 	// and menu bars peek out above and to the left of the desktop rather than
 	// being fully covered by it.
 	if ns, ok := surf.(platform.NativeSurface); ok {
-		off := d.unitToPx(d.EffectiveCellMetrics().CellHeight + d.MenuBarHeight() + d.TitleBarHeight() + core.FindFrameBorderUnits(win))
+		off := d.unitToPx(d.EffectiveCellMetrics().UnitsPerCellHeight + d.MenuBarHeight() + d.TitleBarHeight() + core.FindFrameBorderUnits(win))
 		x, y := ns.ScreenPositionPx()
 		ns.SetScreenPositionPx(x+off, y+off)
 	}
@@ -4246,7 +4246,7 @@ func (d *Desktop) dispatchEvent(event core.Event) bool {
 		// Pointer left the desktop surface: drop any resize-edge highlight,
 		// clear per-widget hover in windows and the desktop chrome, and reset
 		// the cursor to the arrow.
-		wm.ClearResizeHover()
+		wm.ClearResizeBands()
 		wm.ClearHover()
 		d.hostHoverClear()
 		d.hostTitleHoverClear()
@@ -4872,12 +4872,12 @@ func (d *Desktop) ChildAt(pos core.UnitPoint) core.Trinket {
 	}
 
 	// Check menu bar
-	if d.menuBarShown() && pos.Y < by+metrics.CellHeight {
+	if d.menuBarShown() && pos.Y < by+metrics.UnitsPerCellHeight {
 		return d.menuBar
 	}
 
 	// Check status bar
-	if d.statusBarShown() && pos.Y >= bounds.Height-bx-metrics.CellHeight && pos.Y < bounds.Height-bx {
+	if d.statusBarShown() && pos.Y >= bounds.Height-bx-metrics.UnitsPerCellHeight && pos.Y < bounds.Height-bx {
 		return d.statusBar
 	}
 
@@ -5244,7 +5244,7 @@ func (d *Desktop) layoutChildren() {
 			X:      bx,
 			Y:      by,
 			Width:  innerW,
-			Height: metrics.CellHeight,
+			Height: d.MenuBarHeight(),
 		})
 	}
 
@@ -5265,15 +5265,15 @@ func (d *Desktop) layoutChildren() {
 	if d.statusBarShown() {
 		d.statusBar.SetBounds(core.UnitRect{
 			X:      bx,
-			Y:      bounds.Height - bx - metrics.CellHeight,
+			Y:      bounds.Height - bx - metrics.UnitsPerCellHeight,
 			Width:  innerW,
-			Height: metrics.CellHeight,
+			Height: metrics.UnitsPerCellHeight,
 		})
 	}
 
 	// Dock row above status bar
 	if d.dockVisible() {
-		dockY := bounds.Height - bx - metrics.CellHeight - dockHeight
+		dockY := bounds.Height - bx - metrics.UnitsPerCellHeight - dockHeight
 		if !d.statusBarShown() {
 			dockY = bounds.Height - bx - dockHeight
 		}
@@ -5310,10 +5310,10 @@ func (d *Desktop) ClientArea() core.UnitRect {
 	bottom := bounds.Height - bx
 
 	if d.menuBarShown() {
-		top += metrics.CellHeight
+		top += d.MenuBarHeight()
 	}
 	if d.statusBarShown() {
-		bottom -= metrics.CellHeight
+		bottom -= metrics.UnitsPerCellHeight
 	}
 	// Account for dock row height (when not empty)
 	if d.dockVisible() {
@@ -5336,7 +5336,22 @@ func (d *Desktop) MenuBarHeight() core.Unit {
 	if !d.menuBarShown() {
 		return 0
 	}
-	return d.EffectiveCellMetrics().CellHeight
+	// The kit's (possibly scaled) row, the same one the bar paints and hit
+	// tests with -- reserving a full cell for a shortened bar would leave a
+	// dead strip below it that the bar does not answer for.
+	return d.hostMenuMetrics().RowH
+}
+
+// hostMenuMetrics resolves the desktop menu bar's kit metrics. Lock-free
+// like hostTitleMetrics, and for the same reason: MenuBarHeight sits under
+// layout paths that run while d.mu is held, so d.font is read directly
+// rather than through EffectiveFont's lock.
+func (d *Desktop) hostMenuMetrics() MenuMetrics {
+	f := d.font
+	if f == nil {
+		f = core.DefaultFont()
+	}
+	return MenuMetricsFor(d.EffectiveCellMetrics(), f, d.graphicalFrames)
 }
 
 // StatusBarHeight returns the height of the status bar area (0 when there is no
@@ -5345,7 +5360,7 @@ func (d *Desktop) StatusBarHeight() core.Unit {
 	if !d.statusBarShown() {
 		return 0
 	}
-	return d.EffectiveCellMetrics().CellHeight
+	return d.EffectiveCellMetrics().UnitsPerCellHeight
 }
 
 // StatusBarBounds returns the bounds of the status bar area (empty rect when
@@ -5360,9 +5375,9 @@ func (d *Desktop) StatusBarBounds() core.UnitRect {
 	b := d.hostFrameInset()
 	return core.UnitRect{
 		X:      b,
-		Y:      bounds.Height - b - metrics.CellHeight,
+		Y:      bounds.Height - b - metrics.UnitsPerCellHeight,
 		Width:  bounds.Width - 2*b,
-		Height: metrics.CellHeight,
+		Height: metrics.UnitsPerCellHeight,
 	}
 }
 
@@ -5391,7 +5406,7 @@ func (d *Desktop) DockBounds() core.UnitRect {
 	dockHeight := d.dockRow.RequiredHeight()
 	dockY := bounds.Height - b - dockHeight
 	if d.statusBar != nil {
-		dockY = bounds.Height - b - metrics.CellHeight - dockHeight
+		dockY = bounds.Height - b - metrics.UnitsPerCellHeight - dockHeight
 	}
 	return core.UnitRect{
 		X:      b,
@@ -5461,8 +5476,8 @@ func (d *Desktop) Paint(p *core.Painter) {
 		tile, _ := d.WallpaperTile()
 		if !p.TileImage(full, tile, d.WallpaperLayout()) &&
 			!p.FillPattern(full, d.wallpaperPattern, d.wallpaperChunkPx, bgStyle) {
-			for y := core.Unit(0); y < bounds.Height; y += metrics.CellHeight {
-				for x := core.Unit(0); x < bounds.Width; x += metrics.CellWidth {
+			for y := core.Unit(0); y < bounds.Height; y += metrics.UnitsPerCellHeight {
+				for x := core.Unit(0); x < bounds.Width; x += metrics.UnitsPerCellWidth {
 					p.DrawCell(x, y, d.bgChar, bgStyle)
 				}
 			}
@@ -5495,7 +5510,7 @@ func (d *Desktop) Paint(p *core.Painter) {
 			X:      bx,
 			Y:      by,
 			Width:  innerW,
-			Height: metrics.CellHeight,
+			Height: d.MenuBarHeight(),
 		})
 		d.menuBar.Paint(p.WithOffset(bx, by))
 	}
@@ -5503,7 +5518,7 @@ func (d *Desktop) Paint(p *core.Painter) {
 	// Draw dock row above status bar (if not empty)
 	if d.dockVisible() {
 		dockHeight := d.dockRow.RequiredHeight()
-		dockY := bounds.Height - bx - metrics.CellHeight - dockHeight
+		dockY := bounds.Height - bx - metrics.UnitsPerCellHeight - dockHeight
 		if d.statusBar == nil {
 			dockY = bounds.Height - bx - dockHeight
 		}
@@ -5519,12 +5534,12 @@ func (d *Desktop) Paint(p *core.Painter) {
 
 	// Draw status bar at bottom
 	if d.statusBar != nil {
-		y := bounds.Height - bx - metrics.CellHeight
+		y := bounds.Height - bx - metrics.UnitsPerCellHeight
 		d.statusBar.SetBounds(core.UnitRect{
 			X:      bx,
 			Y:      y,
 			Width:  innerW,
-			Height: metrics.CellHeight,
+			Height: metrics.UnitsPerCellHeight,
 		})
 		statusPainter := p.WithOffset(bx, y)
 		d.statusBar.Paint(statusPainter)
@@ -5533,7 +5548,7 @@ func (d *Desktop) Paint(p *core.Painter) {
 	// The genuine window border around the themed surface, over the chrome
 	// like a window's re-stroked frame; then the resize affordance over all.
 	d.paintHostFrame(p, bounds)
-	d.paintHostEdgeHover(p, bounds)
+	d.paintHostEdgeBands(p, bounds)
 
 	// NOTE: Menu dropdowns and popups are NOT painted here in compositor mode!
 	// They must be rendered AFTER windows as separate layers for drop shadows.
@@ -5797,7 +5812,7 @@ func (d *Desktop) HandleMousePress(event core.MousePressEvent) bool {
 
 	// Check menu bar first - either in menu bar area or when menu is open.
 	if d.menuBar != nil {
-		if (event.Y >= by && event.Y < by+metrics.CellHeight) || d.menuBar.ActiveMenu() != nil {
+		if (event.Y >= by && event.Y < by+d.MenuBarHeight()) || d.menuBar.ActiveMenu() != nil {
 			// Cancel drags on other children
 			cancelDrag(d.statusBar)
 			cancelDrag(d.dockRow)
@@ -5811,7 +5826,7 @@ func (d *Desktop) HandleMousePress(event core.MousePressEvent) bool {
 
 	// Check status bar
 	if d.statusBar != nil {
-		statusY := bounds.Height - bx - metrics.CellHeight
+		statusY := bounds.Height - bx - metrics.UnitsPerCellHeight
 		if event.Y >= statusY {
 			// Cancel drags on other children
 			cancelDrag(d.menuBar)
@@ -5827,7 +5842,7 @@ func (d *Desktop) HandleMousePress(event core.MousePressEvent) bool {
 	// Check dock row (above status bar)
 	if d.dockVisible() {
 		dockHeight := d.dockRow.RequiredHeight()
-		dockY := bounds.Height - bx - metrics.CellHeight - dockHeight
+		dockY := bounds.Height - bx - metrics.UnitsPerCellHeight - dockHeight
 		if d.statusBar == nil {
 			dockY = bounds.Height - bx - dockHeight
 		}
@@ -5887,7 +5902,7 @@ func (d *Desktop) HandleMouseMove(event core.MouseMoveEvent) bool {
 		bounds := d.Bounds()
 		metrics := d.EffectiveCellMetrics()
 		dockHeight := d.dockRow.RequiredHeight()
-		dockY := bounds.Height - bx - metrics.CellHeight - dockHeight
+		dockY := bounds.Height - bx - metrics.UnitsPerCellHeight - dockHeight
 		if d.statusBar == nil {
 			dockY = bounds.Height - bx - dockHeight
 		}
@@ -5998,7 +6013,7 @@ func (s *StatusBar) SizeHint() core.UnitSize {
 	metrics := s.EffectiveCellMetrics()
 	return core.UnitSize{
 		Width:  0, // Will stretch to fill
-		Height: metrics.CellHeight,
+		Height: metrics.UnitsPerCellHeight,
 	}
 }
 
@@ -6030,18 +6045,18 @@ func (s *StatusBar) Paint(p *core.Painter) {
 			var textW core.Unit
 			if len(section.Spans) > 0 {
 				for _, span := range section.Spans {
-					textW += font.MeasureText(span.Text)
+					textW += s.MeasureText(span.Text)
 				}
 			} else {
-				textW = font.MeasureText(section.Text)
+				textW = s.MeasureText(section.Text)
 			}
-			sectionWidth = textW + 2*metrics.CellWidth
+			sectionWidth = textW + 2*metrics.UnitsPerCellWidth
 		} else {
-			sectionWidth = core.Unit(section.Width) * metrics.CellWidth
+			sectionWidth = core.Unit(section.Width) * metrics.UnitsPerCellWidth
 		}
 
 		// Draw text - either from spans or plain text - clipped to the slot.
-		textX := x + metrics.CellWidth
+		textX := x + metrics.UnitsPerCellWidth
 		slot := p.WithClip(core.UnitRect{X: x, Y: 0, Width: sectionWidth, Height: bounds.Height})
 
 		if len(section.Spans) > 0 {
@@ -6058,7 +6073,7 @@ func (s *StatusBar) Paint(p *core.Painter) {
 				}
 				segs = append(segs, textSegment{span.Text, spanStyle})
 			}
-			drawTextSegments(slot, textX, 0, font, segs...)
+			drawTextSegments(slot, textX, 0, font, s.EffectiveCellMetrics(), segs...)
 		} else {
 			// Draw plain text
 			slot.DrawText(textX, 0, section.Text, statusBarStyle, font)
