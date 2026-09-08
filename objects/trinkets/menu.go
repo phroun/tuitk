@@ -555,6 +555,34 @@ func drawTextSegments(p *core.Painter, x, y core.Unit, font *core.Font, metrics 
 	}
 }
 
+// accelSegments is a caption cut into the runs to draw left to right, with the
+// accelerator letter in its own style. The caption is prepared for the cell
+// target FIRST and split by where the accelerator LANDED, because the pieces of
+// a run that reads right to left are not the pieces of the text that made it.
+// pos is the accelerator's index in the original text, or -1 for a caption that
+// carries none.
+func accelSegments(text string, dir core.Direction, pos int, normal, accel style.CellStyle) []textSegment {
+	run, where := core.CellRunMapped(text, dir)
+	if pos < 0 || pos >= len(where) || where[pos] < 0 {
+		return []textSegment{{string(run), normal}}
+	}
+	at := where[pos]
+	end := at + 1
+	// A letter's marks are drawn into its own cell, so they wear its style.
+	for end < len(run) && core.CellWidth(run[end]) == 0 {
+		end++
+	}
+	var segs []textSegment
+	if at > 0 {
+		segs = append(segs, textSegment{string(run[:at]), normal})
+	}
+	segs = append(segs, textSegment{string(run[at:end]), accel})
+	if end < len(run) {
+		segs = append(segs, textSegment{string(run[end:]), normal})
+	}
+	return segs
+}
+
 // NewMenu creates a new menu.
 func NewMenu(title string) *Menu {
 	displayTitle, accels := parseAcceleratorTitle(title)
@@ -1056,7 +1084,7 @@ func (m *Menu) calculateSize() core.UnitSize {
 		// is a different currency the moment the menu sits in a window that
 		// carries an override. The cell-based padding around it needs no
 		// such treatment: a cell is a fixed physical size.
-		itemWidth := mm.TextWidth(item.Text)
+		itemWidth := mm.TextWidth(m.CellRun(item.Text))
 
 		// Shortcut: spacing (3 cells) + shortcut text (font-based). Measure
 		// with the same font used to draw it -- 80% on a graphical surface,
@@ -1137,7 +1165,7 @@ func (m *Menu) setGraphicalHint(graphical bool) {
 	m.graphicalKnown = true
 }
 
-// inheritDisplayContext copies the opener's effective grid metrics and
+// inheritDisplayContext copies the opener's effective cell metrics and
 // font onto this popup. Popup menus aren't parented into the trinket
 // tree (see the note on the Menu struct), so their EffectiveCellMetrics
 // and EffectiveFont would otherwise fall back to the built-in 8x16 / 12pt
@@ -1657,20 +1685,12 @@ func (m *Menu) Paint(p *core.Painter) {
 
 		// Draw text in parts: before accel, accel char, after accel
 		textRunes := []rune(item.Text)
-		if item.Enabled && item.acceleratorPos >= 0 && item.acceleratorPos < len(textRunes) {
-			var segs []textSegment
-			if item.acceleratorPos > 0 {
-				segs = append(segs, textSegment{string(textRunes[:item.acceleratorPos]), contentStyle})
-			}
-			segs = append(segs, textSegment{string(textRunes[item.acceleratorPos]), accelStyle})
-			if item.acceleratorPos < len(textRunes)-1 {
-				segs = append(segs, textSegment{string(textRunes[item.acceleratorPos+1:]), contentStyle})
-			}
-			drawTextSegments(p, x, itemY+mm.YOff, font, m.EffectiveCellMetrics(), segs...)
-		} else {
-			// No accelerator or disabled - draw entire text
-			p.DrawText(x, itemY+mm.YOff, item.Text, contentStyle, font)
+		accelAt := -1
+		if item.Enabled && item.acceleratorPos < len(textRunes) {
+			accelAt = item.acceleratorPos
 		}
+		drawTextSegments(p, x, itemY+mm.YOff, font, m.EffectiveCellMetrics(),
+			accelSegments(item.Text, core.FindEffectiveDirection(m.Self()), accelAt, contentStyle, accelStyle)...)
 
 		// Draw shortcut or submenu arrow at the right (in content area). The
 		// menu width is unchanged; only the shortcut hugs closer to the right
@@ -2381,6 +2401,51 @@ func (m *MenuBar) isLastMenuFullyVisible() bool {
 		}
 	}
 	return true
+}
+
+// firstMenuFitsItsMarker reports whether the leftmost menu's title takes no
+// more room than the "..." that stands in for it once it is scrolled off.
+// Both are three cells wide on a terminal for a one-glyph title -- a Ψ, a
+// hamburger -- where the marker measures narrower than most titles on a
+// proportional surface.
+func (m *MenuBar) firstMenuFitsItsMarker() bool {
+	if len(m.menus) == 0 {
+		return false
+	}
+	return m.menuTitleWidth(m.menus[0].title) <= m.ellipsisWidth()
+}
+
+// stepScrollRight gives up one more menu from the left of the run, and two
+// when giving up one would show nothing new.
+//
+// Only the first step pays for the marker: it takes the leftmost title away
+// and puts the "..." where it was, so what it frees is however much wider
+// than the marker that title was. A title no wider frees nothing at all, and
+// the bar comes back looking exactly as it did with one menu fewer on it.
+// Every later step gives its title up outright and always shows something.
+func (m *MenuBar) stepScrollRight() {
+	if !m.canScrollRight() {
+		return
+	}
+	idle := m.scrollOffset == 0 && m.firstMenuFitsItsMarker()
+	m.scrollOffset++
+	if idle && m.canScrollRight() {
+		m.scrollOffset++
+	}
+}
+
+// stepScrollLeft brings one more menu back into the run, and the first menu
+// with it when that one costs no more room than the marker it replaces.
+// Leaving it hidden behind a "..." of its own width buys nothing, so it is
+// shown rather than held back for a step that would look like no step.
+func (m *MenuBar) stepScrollLeft() {
+	if !m.canScrollLeft() {
+		return
+	}
+	m.scrollOffset--
+	if m.scrollOffset == 1 && m.firstMenuFitsItsMarker() {
+		m.scrollOffset--
+	}
 }
 
 // ensureMenuVisible scrolls an overflowing bar as little as it can to bring
@@ -3309,20 +3374,12 @@ func (m *MenuBar) Paint(p *core.Painter) {
 
 				// Draw title with accelerator highlighting using font-aware rendering
 				textX := m.menuTitleTextX(mm, x, menu.title)
-				titleRunes := []rune(menu.title)
-				if showAccel && menu.acceleratorPos >= 0 && menu.acceleratorPos < len(titleRunes) {
-					var segs []textSegment
-					if menu.acceleratorPos > 0 {
-						segs = append(segs, textSegment{string(titleRunes[:menu.acceleratorPos]), s})
-					}
-					segs = append(segs, textSegment{string(titleRunes[menu.acceleratorPos]), accelStyle})
-					if menu.acceleratorPos < len(titleRunes)-1 {
-						segs = append(segs, textSegment{string(titleRunes[menu.acceleratorPos+1:]), s})
-					}
-					drawTextSegments(p, textX, mm.YOff, font, metrics, segs...)
-				} else {
-					p.DrawText(textX, mm.YOff, menu.title, s, font)
+				accelAt := -1
+				if showAccel && menu.acceleratorPos < len([]rune(menu.title)) {
+					accelAt = menu.acceleratorPos
 				}
+				drawTextSegments(p, textX, mm.YOff, font, metrics,
+					accelSegments(menu.title, core.FindEffectiveDirection(m.Self()), accelAt, s, accelStyle)...)
 
 				// Draw the ellipsis after the menu (in normal style); the
 				// painter clips it to the bar's bounds.
@@ -3416,21 +3473,12 @@ func (m *MenuBar) Paint(p *core.Painter) {
 		if !showAccel {
 			accelStyle = s.Underline()
 		}
-		titleRunes := []rune(menu.title)
-		if markAccel && menu.acceleratorPos >= 0 && menu.acceleratorPos < len(titleRunes) {
-			var segs []textSegment
-			if menu.acceleratorPos > 0 {
-				segs = append(segs, textSegment{string(titleRunes[:menu.acceleratorPos]), s})
-			}
-			segs = append(segs, textSegment{string(titleRunes[menu.acceleratorPos]), accelStyle})
-			if menu.acceleratorPos < len(titleRunes)-1 {
-				segs = append(segs, textSegment{string(titleRunes[menu.acceleratorPos+1:]), s})
-			}
-			drawTextSegments(p, textX, mm.YOff, font, metrics, segs...)
-		} else {
-			// No accelerator - draw entire text
-			p.DrawText(textX, mm.YOff, menu.title, s, font)
+		accelAt := -1
+		if markAccel && menu.acceleratorPos < len([]rune(menu.title)) {
+			accelAt = menu.acceleratorPos
 		}
+		drawTextSegments(p, textX, mm.YOff, font, metrics,
+			accelSegments(menu.title, core.FindEffectiveDirection(m.Self()), accelAt, s, accelStyle)...)
 
 		x += menuWidth
 	}
@@ -3697,7 +3745,7 @@ func (m *MenuBar) HandleMousePress(event core.MousePressEvent) bool {
 			// Check [<] button
 			if event.X >= leftButtonX && event.X < leftButtonX+buttonWidth {
 				if m.canScrollLeft() {
-					m.scrollOffset--
+					m.stepScrollLeft()
 					m.Update()
 				}
 				return true
@@ -3707,7 +3755,7 @@ func (m *MenuBar) HandleMousePress(event core.MousePressEvent) bool {
 			rightButtonX := leftButtonX + buttonWidth
 			if event.X >= rightButtonX && event.X < rightButtonX+buttonWidth {
 				if m.canScrollRight() {
-					m.scrollOffset++
+					m.stepScrollRight()
 					m.Update()
 				}
 				return true
@@ -4075,10 +4123,10 @@ func (m *MenuBar) HandleMouseWheel(event core.MouseWheelEvent) bool {
 	if !m.canScrollLeft() && !m.canScrollRight() {
 		return false
 	}
-	if step < 0 && m.canScrollLeft() {
-		m.scrollOffset--
-	} else if step > 0 && m.canScrollRight() {
-		m.scrollOffset++
+	if step < 0 {
+		m.stepScrollLeft()
+	} else {
+		m.stepScrollRight()
 	}
 	m.Update()
 	return true

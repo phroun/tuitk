@@ -1727,7 +1727,9 @@ func (w *Window) frameCellMetrics() core.CellMetrics {
 // FRAME denomination its chrome lays out in (the title bar sits above the
 // content area and is never sized in the interior denomination).
 func (w *Window) titleBarMetrics() TitleBarMetrics {
-	return TitleBarMetricsFor(w.frameCellMetrics(), w.EffectiveFont(), core.FindGraphicalFrames(w))
+	tm := TitleBarMetricsFor(w.frameCellMetrics(), w.EffectiveFont(), core.FindGraphicalFrames(w))
+	tm.Dir = core.FindEffectiveDirection(w.Self())
+	return tm
 }
 
 // frameBorder is the reserved frame border in the FRAME denomination, one
@@ -1863,7 +1865,7 @@ func (w *Window) ClientArea() core.UnitRect {
 	}
 }
 
-// denominations returns the grid-metrics currency of the window's own
+// denominations returns the cell-metrics currency of the window's own
 // coordinate space (outer: the parent's, in which bounds and chrome
 // live) and of its content area (interior: honoring a per-window
 // override). Equal unless an override is set on this window.

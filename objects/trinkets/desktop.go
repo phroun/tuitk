@@ -759,7 +759,7 @@ func (d *Desktop) SetBackend(backend core.RenderBackend) {
 		})
 	}
 
-	// The desktop roots the grid-metrics inheritance chain: seed its
+	// The desktop roots the cell-metrics inheritance chain: seed its
 	// override from the backend so every trinket inherits the display
 	// service's default unless a container overrides it.
 	rootMetrics := backend.Metrics()
@@ -6076,7 +6076,7 @@ func (s *StatusBar) Paint(p *core.Painter) {
 			drawTextSegments(slot, textX, 0, font, s.EffectiveCellMetrics(), segs...)
 		} else {
 			// Draw plain text
-			slot.DrawText(textX, 0, section.Text, statusBarStyle, font)
+			slot.DrawText(textX, 0, s.CellRun(section.Text), statusBarStyle, font)
 		}
 
 		x += sectionWidth

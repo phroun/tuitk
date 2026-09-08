@@ -623,6 +623,18 @@ type SnapOriginSetter interface {
 	SetSnapOrigin(ux, uy Unit) (Unit, Unit)
 }
 
+// CursorColorer is an optional RenderBackend capability: draw the backend's own
+// caret in a given colour, and hand the reader's own setting back when asked
+// for style.ColorDefault.
+//
+// It belongs to backends whose caret is drawn by something else -- a terminal,
+// whose caret colour is one global preference chosen against the terminal's own
+// background. A trinket that paints a background of its own is the only thing
+// that knows a thin caret in that preference would vanish into what it painted.
+type CursorColorer interface {
+	SetCursorColor(c style.Color)
+}
+
 // CaretDrawer is an optional RenderBackend capability: pixel surfaces
 // draw the text-insertion caret as a thin vertical bar sitting at the
 // left edge of the glyph box at (x, y) - where the next character
@@ -898,7 +910,7 @@ func (p *Painter) WithTransform(t Transform) *Painter {
 // WithDenomination returns a Painter whose local coordinates are
 // denominated in `child` metrics, given the current space is
 // denominated in `parent` metrics. Used when descending into a
-// container that carries a grid-metrics override: the same number of
+// container that carries a cell-metrics override: the same number of
 // rows/columns, re-expressed, so re-denomination is visually invariant.
 // Identity when the denominations match.
 func (p *Painter) WithDenomination(parent, child CellMetrics) *Painter {

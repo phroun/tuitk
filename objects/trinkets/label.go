@@ -26,7 +26,7 @@ type Label struct {
 func NewLabel(text string) *Label {
 	l := &Label{
 		text:      text,
-		alignment: core.AlignTextBegin,
+		alignment: core.AlignTextNatural,
 	}
 	l.TrinketBase = *core.NewTrinketBase()
 	l.Init(l)
@@ -126,7 +126,7 @@ func (l *Label) HeightForWidth(width core.Unit) core.Unit {
 	if lineCount < 1 {
 		lineCount = 1
 	}
-	// A text line occupies one grid row, in the container's denomination.
+	// A text line occupies one cell down, in the container's denomination.
 	return core.Unit(lineCount) * metrics.UnitsPerCellHeight
 }
 
@@ -196,7 +196,7 @@ func (l *Label) paintLines(p *core.Painter, bounds core.UnitRect, s style.CellSt
 
 		p.DrawTextAligned(
 			core.UnitRect{X: 0, Y: y, Width: bounds.Width, Height: metrics.UnitsPerCellHeight},
-			line,
+			l.CellRun(line),
 			l.textSide(),
 			core.AlignTop,
 			s,
@@ -225,7 +225,7 @@ func (l *Label) paintWrapped(p *core.Painter, bounds core.UnitRect, s style.Cell
 
 		p.DrawTextAligned(
 			core.UnitRect{X: 0, Y: y, Width: bounds.Width, Height: metrics.UnitsPerCellHeight},
-			line,
+			l.CellRun(line),
 			l.textSide(),
 			core.AlignTop,
 			s,

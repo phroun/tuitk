@@ -126,8 +126,18 @@ type Scheme struct {
 	DarkPaneEditBoxPlaceholder    *CellStyle // nil = EditBoxPlaceholder
 	FocusedEditBoxText            *CellStyle // black on dark cyan
 	FocusedEditBoxCursor          *CellStyle // black on white (cell block cursor)
-	FocusedEditBoxBarCursor       *CellStyle // bright white (graphical bar caret)
-	FocusedEditBoxFill            *CellStyle // white on cyan
+	// FocusedEditBoxCaret is the INSERTION caret's ink -- the bar a field
+	// always in insert mode wears, painted on a pixel surface and asked of the
+	// terminal on a cell one.
+	//
+	// One colour, not a pair. A block cursor covers a character and inverts it,
+	// so it needs both an ink and a ground; a bar covers nothing and has only
+	// an ink. It is brighter than the block's ground by default, because a bar
+	// is a few pixels wide and has to be found against whatever the field is
+	// painted in -- and a theme that sets a field's own colours is the thing
+	// that knows what shows up on them.
+	FocusedEditBoxCaret *Color     // bright white
+	FocusedEditBoxFill  *CellStyle // white on cyan
 	// An input method's in-flight composition. ActiveClause is the segment it
 	// is CONVERTING right now — and is what a composition with no clause wears
 	// throughout, since all of such a one is the material being worked on.
@@ -239,6 +249,7 @@ type Scheme struct {
 	Scrollbar             *CellStyle // dark gray on black
 	ScrollbarThumb        *CellStyle // regular white on black
 	HoveredScrollbarThumb *CellStyle // nil = HoverBG + HoverFG
+	FocusedScrollbarThumb *CellStyle // nil = FocusBG + FocusFG
 
 	// =========================================================================
 	// ProgressBar Colors
@@ -442,7 +453,7 @@ func DefaultScheme() *Scheme {
 		DarkPaneEditBoxPlaceholder:        nil, // EditBoxPlaceholder
 		FocusedEditBoxText:                ptr(DefaultStyle().WithFg(ColorBlack).WithBg(ColorCyan)),
 		FocusedEditBoxCursor:              ptr(DefaultStyle().WithFg(ColorBlack).WithBg(ColorWhite)),
-		FocusedEditBoxBarCursor:           ptr(DefaultStyle().WithFg(ColorBlack).WithBg(ColorBrightWhite)),
+		FocusedEditBoxCaret:               colorPtr(ColorBrightWhite),
 		FocusedEditBoxFill:                ptr(DefaultStyle().WithFg(ColorWhite).WithBg(ColorCyan)),
 		FocusedEditBoxIMEInactive:         ptr(DefaultStyle().WithFg(ColorBrightWhite).WithBg(ColorCyan)),
 		FocusedEditBoxIMEActiveClause:     ptr(DefaultStyle().WithFg(ColorRed).WithBg(ColorCyan)),
@@ -527,6 +538,7 @@ func DefaultScheme() *Scheme {
 		Scrollbar:             ptr(DefaultStyle().WithFg(ColorBrightBlack).WithBg(ColorBlack)),
 		ScrollbarThumb:        ptr(DefaultStyle().WithFg(ColorWhite).WithBg(ColorBlack)),
 		HoveredScrollbarThumb: ptr(DefaultStyle().WithFg(ColorMagenta).WithBg(ColorBlack)), // dark magenta thumb
+		FocusedScrollbarThumb: ptr(DefaultStyle().WithFg(ColorCyan).WithBg(ColorBlack)),    // the focus accent, as a thumb
 
 		// ProgressBar
 		ProgressFull:      ptr(DefaultStyle().WithFg(ColorBrightGreen).WithBg(ColorGreen)),
@@ -922,7 +934,7 @@ func (s *Scheme) GetFocusedEditBoxIMEInactive() CellStyle {
 	if s.FocusedEditBoxIMEInactive != nil {
 		return *s.FocusedEditBoxIMEInactive
 	}
-	return DefaultStyle().WithFg(s.GetFocusedEditBoxBarCursor().Bg)
+	return DefaultStyle().WithFg(s.GetFocusedEditBoxCaret())
 }
 
 // GetFocusedEditBoxIMEActiveClause returns the style for the clause an input
@@ -940,11 +952,11 @@ func (s *Scheme) GetFocusedEditBoxIMEActiveClause() CellStyle {
 	return s.GetFocusedEditBoxIMEInactive()
 }
 
-// GetFocusedEditBoxBarCursor returns the color for the graphical bar
-// caret (a brighter white than the cell block cursor, for contrast),
-// falling back to the block cursor color when unset.
-func (s *Scheme) GetFocusedEditBoxBarCursor() CellStyle {
-	return or(s.FocusedEditBoxBarCursor, s.FocusedEditBoxCursor)
+// GetFocusedEditBoxCaret returns the ink the insertion caret is drawn in,
+// falling back to the block cursor's ground when the scheme sets no caret of
+// its own -- one caret in one colour either way.
+func (s *Scheme) GetFocusedEditBoxCaret() Color {
+	return orColor(s.FocusedEditBoxCaret, s.GetFocusedEditBoxCursor().Bg)
 }
 
 // GetEditBoxSelection returns the selection colors inside an edit
@@ -964,6 +976,23 @@ func (s *Scheme) GetEditBoxSelection(focused bool, pane PaneType) CellStyle {
 	return DefaultStyle().
 		WithFg(orColor(s.RestingEditBoxSelectionFG, ColorWhite)).
 		WithBg(orColor(s.RestingEditBoxSelectionBG, ColorBlack))
+}
+
+// GetEditBoxSelectionRiding returns the selection colours for a line a
+// background fill cannot be trusted on: the ordinary selection's own ground
+// worn as INK, and bold.
+//
+// A terminal that reorders what it is sent counts codepoints where the grid
+// counts cells, so a fill over a line holding combining marks lands on the
+// wrong cells and half-vanishes. Foreground colour and weight ride each glyph
+// through that reordering intact -- and nothing else does, so this uses no
+// background, no reverse and no underline, each of which drifts the same way.
+//
+// It takes the ordinary selection's background as its foreground, so a scheme
+// that says what a selection looks like has said what this looks like too.
+func (s *Scheme) GetEditBoxSelectionRiding(focused bool, pane PaneType) CellStyle {
+	sel := s.GetEditBoxSelection(focused, pane)
+	return DefaultStyle().WithFg(sel.Bg).WithAttrs(StyleBold)
 }
 
 // --- ComboBox Colors ---
@@ -1351,10 +1380,37 @@ func (s *Scheme) GetHoveredScrollbarThumb() CellStyle {
 	return s.hover()
 }
 
-// GetScrollbarThumbState resolves the scrollbar thumb style; the thumb has
-// no focus state, so hover is the only elevated state.
-func (s *Scheme) GetScrollbarThumbState(hovered bool) CellStyle {
-	if hovered {
+// GetFocusedScrollbarThumb is the thumb of a focused owner's scrollbar.
+//
+// A thumb is drawn in its FOREGROUND -- filled with it on a pixel surface, and
+// on a character one it is the ink of the block glyph -- so the accent belongs
+// there, over the ground the resting thumb already sits on. Handed the general
+// focus style instead (dark text ON the accent) a thumb comes out the colour
+// of the text: black, on a black track, at the moment it is most wanted.
+//
+// The hovered thumb is built the same way, magenta where this is cyan.
+func (s *Scheme) GetFocusedScrollbarThumb() CellStyle {
+	if s.FocusedScrollbarThumb != nil {
+		return *s.FocusedScrollbarThumb
+	}
+	return s.GetScrollbarThumb().WithFg(s.GetFocusBG())
+}
+
+// GetScrollbarThumbState resolves the scrollbar THUMB style, with the
+// precedence focus > hover > normal that the splitter's handle uses. The
+// track and the corner where two bars meet do not move: the thumb is the part
+// that reads as the control, and lighting the whole gutter would be a band of
+// focus colour down the side of every focused pane.
+//
+// Focus is asked of the trinket the bar belongs to, and only a trinket with
+// nothing else to show it with answers yes: a scroll area is a container whose
+// chrome IS its bars, so a keyboard user has no other sign of where they are.
+// A list or a tree says it with its selection, and passes false.
+func (s *Scheme) GetScrollbarThumbState(focused, hovered bool) CellStyle {
+	switch {
+	case focused:
+		return s.GetFocusedScrollbarThumb()
+	case hovered:
 		return s.GetHoveredScrollbarThumb()
 	}
 	return s.GetScrollbarThumb()

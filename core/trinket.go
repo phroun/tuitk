@@ -661,13 +661,16 @@ func (w *TrinketBase) Direction() Direction {
 // SetDirection names the side text begins on for this trinket and everything
 // below it; DirInherit hands the question back to the ancestors.
 //
-// Everything under it is placed against this, so the tree below repaints.
+// Everything under it is placed against this, so the tree below repaints -- and
+// anything down there holding an answer it derived from the direction is told,
+// because what it derived that answer from has just moved.
 func (w *TrinketBase) SetDirection(d Direction) {
 	w.mu.Lock()
 	w.direction = d
 	w.needsRepaint = true
 	w.mu.Unlock()
 
+	NotifyDirectionChanged(w.Self())
 	w.notifyAncestorsOfRepaint()
 }
 
@@ -1129,7 +1132,7 @@ func (w *TrinketBase) EffectiveFont() *Font {
 	return FindEffectiveFont(w.Self())
 }
 
-// CellMetricsOverride returns the grid metrics explicitly set on this
+// CellMetricsOverride returns the cell metrics explicitly set on this
 // trinket, or nil if inheriting.
 func (w *TrinketBase) CellMetricsOverride() *CellMetrics {
 	w.mu.RLock()
@@ -1137,7 +1140,7 @@ func (w *TrinketBase) CellMetricsOverride() *CellMetrics {
 	return w.cellMetrics
 }
 
-// SetCellMetrics sets explicit grid metrics for this trinket/container.
+// SetCellMetrics sets explicit cell metrics for this trinket/container.
 // Set to nil to inherit from parent/window/desktop.
 func (w *TrinketBase) SetCellMetrics(m *CellMetrics) {
 	w.mu.Lock()
@@ -1160,6 +1163,13 @@ func (w *TrinketBase) SetCellMetrics(m *CellMetrics) {
 	w.Update()
 }
 
+// CellRun is CellRun for this trinket: the run prepared for a cell target in
+// the direction this trinket reads in. Measure and draw the SAME prepared run
+// -- see CellRun for why the two cannot be different strings.
+func (w *TrinketBase) CellRun(text string) string {
+	return CellRun(text, FindEffectiveDirection(w.Self()))
+}
+
 // MeasureText measures text in THIS trinket's denomination -- how many of
 // its units the text occupies. A trinket laying itself out against text it
 // will paint wants this rather than Font.MeasureText, which answers at the
@@ -1169,7 +1179,7 @@ func (w *TrinketBase) MeasureText(text string) Unit {
 	return w.EffectiveFont().MeasureTextIn(text, w.EffectiveCellMetrics())
 }
 
-// EffectiveCellMetrics returns the grid metrics to use for this trinket.
+// EffectiveCellMetrics returns the cell metrics to use for this trinket.
 // It checks this trinket, then walks up the parent chain, falling back
 // to DefaultCellMetrics.
 func (w *TrinketBase) EffectiveCellMetrics() CellMetrics {

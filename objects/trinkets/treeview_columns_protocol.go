@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/phroun/kittytk/core"
 	"github.com/phroun/kittytk/protocol"
 )
 
@@ -12,9 +13,10 @@ import (
 // descriptor with its per-item `cell` values, and the treeview's
 // column-related properties. Columns nest like everything else (D13):
 //
-//	new treeview caption="Name" showheader children={
-//	    new column id=size caption="Size" width=10 align=right sortable
-//	    new column id=kind caption="Kind" width=12
+//	new treeview caption="Name" showheader columns={
+//	    new column id=size caption="Size" width=80 align=right sortable
+//	    new column id=kind caption="Kind" width=96
+//	} items={
 //	    new item caption="Report.txt"
 //	}
 //
@@ -195,6 +197,20 @@ func colInt(name string, set func(col *TreeColumn, n int)) protocol.Property {
 	}))
 }
 
+// colUnits is a column property counted in UNITS, as every other measurement
+// in this toolkit is: how far a unit goes is the denomination's answer, so the
+// same number is a different number of columns in a re-denominated subtree.
+func colUnits(name string, set func(col *TreeColumn, w core.Unit)) protocol.Property {
+	return protocol.NewProperty("units", colProp(name, func(c *wireColumn, v *protocol.Value, f protocol.FlagState) error {
+		n, err := protocol.AsInt(name, v, f)
+		if err != nil {
+			return err
+		}
+		set(c.target(), core.Unit(n))
+		return nil
+	}))
+}
+
 func colFlag(name string, set func(col *TreeColumn, b bool)) protocol.Property {
 	return protocol.NewProperty("flag", colProp(name, func(c *wireColumn, v *protocol.Value, f protocol.FlagState) error {
 		b, err := protocol.AsBool(name, v, f)
@@ -232,7 +248,8 @@ func init() {
 		// columns silently lose the divider drag and the [=] chooser.
 		New: func() any {
 			return &wireColumn{col: TreeColumn{
-				Width: 8, MinWidth: 3, MaxWidth: -1, Align: "left",
+				Width: treeColDefaultWidth, MinWidth: treeColMinWidth,
+				MaxWidth: core.Unbounded, Align: core.AlignTextNatural,
 				Resizable: true, Optional: true, SortProxy: -1,
 			}}
 		},
@@ -247,22 +264,37 @@ func init() {
 			})).Tip("Stable key cell values are stored under. Must differ from " +
 				"every other column's on the same treeview, blank included."),
 			"caption":   colString("caption", func(c *TreeColumn, s string) { c.Caption = s }).Tip("Header caption."),
-			"width":     colInt("width", func(c *TreeColumn, n int) { c.Width = n }).Tip("Width in text cells.").Def("8"),
-			"min_width": colInt("min_width", func(c *TreeColumn, n int) { c.MinWidth = n }).Tip("Minimum width in text cells.").Def("3"),
-			"max_width": colInt("max_width", func(c *TreeColumn, n int) { c.MaxWidth = n }).
-				Tip("Widest the column may be dragged, in text cells. -1 is no limit; a maximum below min_width loses to it.").Def("-1"),
+			"width":     colUnits("width", func(c *TreeColumn, w core.Unit) { c.Width = w }).Tip("Width, in units.").Def("64"),
+			"min_width": colUnits("min_width", func(c *TreeColumn, w core.Unit) { c.MinWidth = w }).Tip("Minimum width, in units.").Def("24"),
+			"max_width": colUnits("max_width", func(c *TreeColumn, w core.Unit) { c.MaxWidth = w }).
+				Tip("Widest the column may be dragged, in units. -1 is no limit; a maximum below min_width loses to it.").Def("-1"),
 			"align": protocol.NewProperty("enum", colProp("align", func(c *wireColumn, v *protocol.Value, f protocol.FlagState) error {
-				w, err := protocol.AsWord("align", v, f)
+				word, err := protocol.AsWord("align", v, f)
 				if err != nil {
 					return err
 				}
-				switch w {
-				case "left", "center", "right":
-					c.target().Align = w
-					return nil
+				a, err := hAlignWord("align", word)
+				if err != nil {
+					return err
 				}
-				return fmt.Errorf("align: expected left, center, or right")
-			})).OneOf("left", "center", "right").Def("left").Tip("Cell text alignment."),
+				c.target().Align = a
+				return nil
+			})).OneOf(hAlignWordList()...).Def("textnatural").
+				Tip("Where a cell's text sits. textnatural/textopposite follow each cell's own script; " +
+					"layoutnatural/layoutopposite follow the column's direction; the optical pair names a side outright."),
+			"direction": protocol.NewProperty("enum", colProp("direction", func(c *wireColumn, v *protocol.Value, f protocol.FlagState) error {
+				word, err := protocol.AsWord("direction", v, f)
+				if err != nil {
+					return err
+				}
+				d, err := directionWord("direction", word)
+				if err != nil {
+					return err
+				}
+				c.target().Direction = d
+				return nil
+			})).OneOf("inherit", "ltr", "rtl").Def("inherit").
+				Tip("Which way this column's CONTENT reads; inherit takes the treeview's. Where the column sits among the others is the treeview's to settle."),
 			"resizable": colFlag("resizable", func(c *TreeColumn, b bool) { c.Resizable = b }).Tip("Header divider drag-resizes this column.").Def("true"),
 			"hidden":    colFlag("hidden", func(c *TreeColumn, b bool) { c.Hidden = b }).Tip("Column is not displayed.").Def("false"),
 			"optional":  colFlag("optional", func(c *TreeColumn, b bool) { c.Optional = b }).Tip("Column appears in the [=] show/hide chooser.").Def("true"),
@@ -385,13 +417,24 @@ func treeViewProps() map[string]protocol.Property {
 		"treelines":  boolProp("treelines", (*TreeView).SetTreeLines).Tip("Connector lines in the indent space; leaf items get a glyph too.").Def("false"),
 		"showkey":    boolProp("showkey", (*TreeView).SetShowKey).Tip("Show the key (tree) column first.").Def("true"),
 		"fit_width":  boolProp("fit_width", (*TreeView).SetFitWidth).Tip("Squeeze columns to the width (no horizontal scrolling).").Def("true"),
-		"key_width":  intProp("key_width", (*TreeView).SetKeyWidth).Tip("Key column width in text cells (scroll mode).").Def("20"),
-		"fixed_left": intProp("fixed_left", func(t *TreeView, n int) {
-			t.SetFixedColumns(n, t.fixedRight)
-		}).Tip("Visible columns pinned outside horizontal scrolling, from the left.").Def("0"),
-		"fixed_right": intProp("fixed_right", func(t *TreeView, n int) {
-			t.SetFixedColumns(t.fixedLeft, n)
-		}).Tip("Visible columns pinned outside horizontal scrolling, from the right.").Def("0"),
+		"key_width": protocol.NewProperty("units", wprop("key_width", func(_ *protocol.BindContext, w core.Trinket, v *protocol.Value, f protocol.FlagState) error {
+			n, err := protocol.AsInt("key_width", v, f)
+			if err != nil {
+				return err
+			}
+			t, ok := w.(*TreeView)
+			if !ok {
+				return fmt.Errorf("key_width: not supported by this type")
+			}
+			t.SetKeyWidth(core.Unit(n))
+			return nil
+		})).Tip("Key column width in units (scroll mode).").Def("160"),
+		"fixed_begin": intProp("fixed_begin", func(t *TreeView, n int) {
+			t.SetFixedColumns(n, t.fixedEnd)
+		}).Tip("Visible columns pinned outside horizontal scrolling, counted from where the run begins.").Def("0"),
+		"fixed_end": intProp("fixed_end", func(t *TreeView, n int) {
+			t.SetFixedColumns(t.fixedBegin, n)
+		}).Tip("Visible columns pinned outside horizontal scrolling, counted from where the run ends.").Def("0"),
 		"sorted": boolProp("sorted", func(t *TreeView, b bool) {
 			t.SetSorted(b, t.sortedBy, t.sortDescending)
 		}).Tip("Show the sort indicator.").Def("false"),
@@ -402,20 +445,17 @@ func treeViewProps() map[string]protocol.Property {
 			t.SetSorted(t.sorted, t.sortedBy, b)
 		}).Tip("Sort direction indicator points down.").Def("false"),
 
-		"children": protocol.NewCollection(func(parent, child any) error {
+		"columns": protocol.NewCollection(func(parent, child any) error {
 			tv, ok := parent.(*TreeView)
 			if !ok {
 				return fmt.Errorf("treeview: wrong parent type %T", parent)
 			}
 			switch c := child.(type) {
-			case *wireItem:
-				tv.AddRootItem(c.bind(tv))
-				return nil
 			case *wireColumn:
 				return c.bind(tv)
 			case *wireCollection:
 				// A collection is packaging: adopt each member as if
-				// appended directly.
+				// written here directly.
 				for _, m := range c.members {
 					col, ok := m.(*wireColumn)
 					if !ok {
@@ -427,8 +467,22 @@ func treeViewProps() map[string]protocol.Property {
 				}
 				return nil
 			}
-			return fmt.Errorf("treeview: children must be items or columns, got %T", child)
-		}).Members("item", "column", "collection").
-			Tip("The rows and the columns they are read across."),
+			return fmt.Errorf("treeview: columns must be columns, got %T", child)
+		}).Members("column", "collection").
+			Tip("The columns the rows are read across, left to right."),
+
+		"items": protocol.NewCollection(func(parent, child any) error {
+			tv, ok := parent.(*TreeView)
+			if !ok {
+				return fmt.Errorf("treeview: wrong parent type %T", parent)
+			}
+			it, ok := child.(*wireItem)
+			if !ok {
+				return fmt.Errorf("treeview: items must be items, got %T", child)
+			}
+			tv.AddRootItem(it.bind(tv))
+			return nil
+		}).Members("item").
+			Tip("The rows, top to bottom. A row nests its own under items."),
 	}
 }

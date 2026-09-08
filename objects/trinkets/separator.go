@@ -167,7 +167,7 @@ func (s *LineSeparator) paintHorizontalGraphical(p *core.Painter, bounds core.Un
 	base := s.EffectiveFont()
 	font := captionFont75(base)
 	// Width comes back screen-space (see ScreenWidthToLocal). The line the
-	// caption occupies is three quarters of a grid row, already local.
+	// caption occupies is three quarters of a cell down, already local.
 	w := p.ScreenWidthToLocal(font.MeasureText(s.title))
 	h := core.LineUnits(font, base, s.EffectiveCellMetrics())
 	pad := p.ScreenWidthToLocal(6)
@@ -179,7 +179,7 @@ func (s *LineSeparator) paintHorizontalGraphical(p *core.Painter, bounds core.Un
 	// The line in two segments: the mid-section belongs to the title.
 	p.FillRect(core.UnitRect{X: 0, Y: midY, Width: boxX, Height: hairH}, ' ', line)
 	p.FillRect(core.UnitRect{X: boxX + boxW, Y: midY, Width: bounds.Width - boxX - boxW, Height: hairH}, ' ', line)
-	p.DrawText(boxX+pad, midY+hairH/2-h/2, s.title, titleStyle, font)
+	p.DrawText(boxX+pad, midY+hairH/2-h/2, s.CellRun(s.title), titleStyle, font)
 }
 
 // paintVerticalGraphical draws the vertical rule: a hairline spanning
@@ -221,7 +221,10 @@ func (s *LineSeparator) paintHorizontal(p *core.Painter, bounds core.UnitRect, l
 	}
 
 	y := core.Unit(0)
-	titleRunes := []rune(s.title)
+	// The rule is drawn a cell at a time, so the title is prepared for the
+	// cell target before it is spread across those cells -- a per-rune loop
+	// over the text itself would lay a right-to-left title down backwards.
+	titleRunes := []rune(s.CellRun(s.title))
 	titleLen := len(titleRunes)
 
 	// No grab-handle dots here: the ···· decoration means "draggable"
@@ -234,7 +237,7 @@ func (s *LineSeparator) paintHorizontal(p *core.Painter, bounds core.UnitRect, l
 		}
 	} else {
 		// ────── Title ──────
-		middleRunes := []rune(" " + s.title + " ")
+		middleRunes := []rune(" " + string(titleRunes) + " ")
 		middleLen := len(middleRunes)
 		startMiddle := (width - middleLen) / 2
 

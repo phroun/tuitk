@@ -108,6 +108,21 @@ func (c *ComboBox) markPopupGrab(localX, localY core.Unit) {
 	c.popupDownX, c.popupDownY = localX, localY
 }
 
+// ancestor is the trinket whose ancestry answers for this box: itself when it
+// is parented, and its embed host when it is not.
+//
+// An embedded box -- a tree's cell editor -- is deliberately unparented, so
+// every question asked up the chain from it (what surface am I on, what
+// denomination is in force) answers with the default rather than the truth.
+// SetEmbedHost is what lends it the chain; this is where the chain is picked
+// up for the questions that are not the popup controller's.
+func (c *ComboBox) ancestor() core.Trinket {
+	if c.embedHost != nil {
+		return c.embedHost
+	}
+	return c.Self()
+}
+
 // mapToScreen maps a box-local point to screen space, through the
 // embed host when one is set.
 func (c *ComboBox) mapToScreen(pc core.PopupController, local core.UnitPoint) core.UnitPoint {
@@ -693,7 +708,11 @@ func (c *ComboBox) registerPopupOverlay(pc core.PopupController) {
 		}
 	}
 
-	popupBounds := gridPopupRect(c.Self(), screen, core.UnitRect{
+	// Asked of the HOST's ancestry: a drop-down is anchored to its box, and a
+	// box standing between cells on a surface that can draw it there wants a
+	// list that stands with it. Snapping one and not the other is what put the
+	// list a fraction of a column off the control it belongs to.
+	popupBounds := gridPopupRect(c.ancestor(), screen, core.UnitRect{
 		X: trinketBottomPos.X,
 		Y: popupY,
 		// The trinket's width is in its own denomination; the popup
@@ -788,7 +807,7 @@ func (c *ComboBox) SizeHint() core.UnitSize {
 	minWidth := c.MeasureText("----------") // Minimum 10 chars
 	maxWidth := minWidth
 	for _, item := range c.items {
-		itemWidth := c.MeasureText(item)
+		itemWidth := c.MeasureText(c.CellRun(item))
 		if itemWidth > maxWidth {
 			maxWidth = itemWidth
 		}
@@ -845,16 +864,26 @@ func (c *ComboBox) Paint(p *core.Painter) {
 	// Get font for text measurement and rendering
 	font := c.EffectiveFont()
 
+	// The arrow sits on the TRAILING edge and the value runs back from the
+	// leading one, so a combobox in a right-to-left form reads value then
+	// arrow from the right. The gap between the two travels with the arrow,
+	// which is why the run is turned around rather than just moved.
+	arrow := " ▼"
+	if core.ChromeMirrored(c.ancestor()) {
+		arrow = "▼ "
+	}
+
 	// Calculate text area width (leave space for arrow)
-	arrowWidth := c.MeasureText(" ▼")
+	arrowWidth := c.MeasureText(arrow)
 	textAreaWidth := bounds.Width - arrowWidth
 
 	// Draw text
-	p.DrawText(0, 0, c.displayText(text, textAreaWidth), s, font)
+	// Cut to fit first, prepared for the cell target after.
+	shown := c.CellRun(c.displayText(text, textAreaWidth))
+	p.DrawText(core.LeadingX(c.ancestor(), bounds.Width, 0, c.MeasureText(shown)), 0, shown, s, font)
 
-	// Draw dropdown arrow at the right
-	arrowX := bounds.Width - arrowWidth
-	p.DrawText(arrowX, 0, " ▼", s, font)
+	// Draw dropdown arrow at the trailing edge
+	p.DrawText(core.LeadingX(c.ancestor(), bounds.Width, textAreaWidth, arrowWidth), 0, arrow, s, font)
 
 	// While the drop-down is open, frame the box with the same 1-pixel
 	// separator-color stroke as the popup. Painted by the trinket itself
@@ -936,16 +965,20 @@ func (c *ComboBox) paintPopup(p *core.Painter) {
 			Width:  bounds.Width,
 			Height: metrics.UnitsPerCellHeight,
 		})
-		rowPainter.DrawText(metrics.UnitsPerCellWidth, itemY, item, s, font)
+		run := c.CellRun(item)
+		rowPainter.DrawText(core.LeadingX(c.ancestor(), bounds.Width, metrics.UnitsPerCellWidth, c.MeasureText(run)),
+			itemY, run, s, font)
 	}
 
 	// Draw scroll indicators if needed
 	if c.scrollOffset > 0 {
-		p.DrawCell(bounds.Width-metrics.UnitsPerCellWidth*2, popupY, '▲', itemStyle)
+		p.DrawCell(core.LeadingX(c.ancestor(), bounds.Width, bounds.Width-metrics.UnitsPerCellWidth*2, metrics.UnitsPerCellWidth),
+			popupY, '▲', itemStyle)
 	}
 	if c.scrollOffset+popupHeight < len(c.items) {
 		endY := popupY + core.Unit(popupHeight-1)*metrics.UnitsPerCellHeight
-		p.DrawCell(bounds.Width-metrics.UnitsPerCellWidth*2, endY, '▼', itemStyle)
+		p.DrawCell(core.LeadingX(c.ancestor(), bounds.Width, bounds.Width-metrics.UnitsPerCellWidth*2, metrics.UnitsPerCellWidth),
+			endY, '▼', itemStyle)
 	}
 }
 
@@ -1050,7 +1083,9 @@ func (c *ComboBox) paintPopupOverlay(p *core.Painter, popupBounds core.UnitRect)
 			Width:  popupBounds.Width,
 			Height: metrics.UnitsPerCellHeight,
 		})
-		rowPainter.DrawText(metrics.UnitsPerCellWidth, itemY, item, s, font)
+		run := c.CellRun(item)
+		rowPainter.DrawText(core.LeadingX(c.ancestor(), popupBounds.Width, metrics.UnitsPerCellWidth, c.MeasureText(run)),
+			itemY, run, s, font)
 	}
 
 	// Draw scroll down indicator or scrollbar
@@ -1083,7 +1118,9 @@ func (c *ComboBox) scrollbarGeometry(popupWidth core.Unit, visibleCount int) (sc
 	metrics := c.screenMetrics()
 	totalItems := len(c.items)
 
-	scrollbarX = popupWidth - metrics.UnitsPerCellWidth
+	// The lane is on the TRAILING edge -- the right of a left-to-right list
+	// and the left of a right-to-left one.
+	scrollbarX = core.LeadingX(c.ancestor(), popupWidth, popupWidth-metrics.UnitsPerCellWidth, metrics.UnitsPerCellWidth)
 	trackHeight = visibleCount
 
 	if totalItems <= visibleCount {
@@ -1174,7 +1211,7 @@ func (c *ComboBox) paintScrollbar(p *core.Painter, popupWidth core.Unit, visible
 	// rectangle for the thumb, both at unit granularity.
 	if p.Graphical() {
 		trackU, thumbU, posU := c.popupScrollbarUnits(visibleCount)
-		laneX := popupWidth - metrics.UnitsPerCellWidth
+		laneX := core.LeadingX(c.ancestor(), popupWidth, popupWidth-metrics.UnitsPerCellWidth, metrics.UnitsPerCellWidth)
 		stripeX := laneX + metrics.UnitsPerCellWidth/2
 		p.FillRect(core.UnitRect{
 			X:      stripeX,
@@ -1257,14 +1294,17 @@ func (c *ComboBox) handlePopupMousePress(event core.MousePressEvent, popupBounds
 			}
 
 			scrollbarX, thumbStart, thumbHeight, _ := c.scrollbarGeometry(popupBounds.Width, popupHeight)
-			if event.X >= popupBounds.X+scrollbarX {
+			// The lane is one column wherever it sits, so the hit area is
+			// that column rather than everything past its near edge.
+			laneAt := popupBounds.X + scrollbarX
+			if event.X >= laneAt && event.X < laneAt+metrics.UnitsPerCellWidth {
 				// Click on scrollbar area
 				relY := event.Y - popupBounds.Y
 				clickedRow := int(relY / metrics.UnitsPerCellHeight)
 
 				// Pixel surfaces anchor the drag to the grab point
 				// within the unit-granular thumb.
-				if core.FindSmoothPositioning(c.Self()) {
+				if core.FindSmoothPositioning(c.ancestor()) {
 					_, thumbU, posU := c.popupScrollbarUnits(popupHeight)
 					pos := float64(relY)
 					if pos >= posU && pos < posU+thumbU {
