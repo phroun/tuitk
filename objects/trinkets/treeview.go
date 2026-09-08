@@ -113,15 +113,15 @@ type TreeView struct {
 	// the KEY column; data columns render item cell values beside it.
 	columns    []*TreeColumn
 	showHeader bool
-	showKey    bool   // key column shown as the first visible column
-	keyCaption string // header caption over the key (tree) column
-	ledger     bool   // alternate non-selected rows in LedgerOdd/LedgerEven
-	treeLines  bool   // connector lines + leaf glyphs in the indent space
-	fitWidth   bool   // true: squeeze to width (no hscroll); false: pan
-	fixedLeft  int    // visible columns pinned outside the hscroll region
-	fixedRight int
-	keyWidth   int // key column cells in scroll mode (0 = default)
-	hScroll    int // horizontal scroll offset in cells
+	showKey    bool      // key column shown as the first visible column
+	keyCaption string    // header caption over the key (tree) column
+	ledger     bool      // alternate non-selected rows in LedgerOdd/LedgerEven
+	treeLines  bool      // connector lines + leaf glyphs in the indent space
+	fitWidth   bool      // true: squeeze to width (no hscroll); false: pan
+	fixedBegin int       // visible columns pinned outside the hscroll region,
+	fixedEnd   int       // counted from the run's beginning and its end
+	keyWidth   core.Unit // key column width in scroll mode (0 = default)
+	hScroll    core.Unit // horizontal scroll offset in units
 
 	// Divider drag-resize state (nil colDragCol = the key column).
 	// colDragInvert: the divider is sizing the column to its RIGHT
@@ -129,7 +129,7 @@ type TreeView struct {
 	colDragging   bool
 	colDragCol    *TreeColumn
 	colDragStartX core.Unit
-	colDragStartW int
+	colDragStartW core.Unit
 	colDragInvert bool
 
 	// Composite fit-mode drag: the grabbed line moves by resizing the
@@ -143,15 +143,15 @@ type TreeView struct {
 	colDragSlackRight bool        // pool right of the line (key hidden)
 	colDragL          *TreeColumn // nil = the key column (divider 0)
 	colDragR          *TreeColumn
-	colDragLW         int
-	colDragRW         int
-	colDragPool       int // slack cells consumable before reclaim would kick in
+	colDragLW         core.Unit
+	colDragRW         core.Unit
+	colDragPool       core.Unit // slack consumable before reclaim would kick in
 
 	// Horizontal scrollbar (footer row) drag state.
 	hbarDragging     bool
 	hbarThumbHovered bool // pointer over the footer thumb (hover color)
 	hbarDragStartX   core.Unit
-	hbarDragStartHS  int
+	hbarDragStartHS  core.Unit
 
 	// In-place row editing (see treeview_edit.go). The editor is a
 	// spun-into-existence TextInput floating over one cell; the tree
@@ -215,6 +215,25 @@ func NewTreeView() *TreeView {
 		fitWidth:       true,
 	}
 	t.TrinketBase = *core.NewTrinketBase()
+	t.declareCommands()
+	t.Init(t) // Enable polymorphic focus handling
+	t.SetFocusPolicy(core.StrongFocus)
+	t.SetAccessibleRole(core.RoleTree)
+	return t
+}
+
+// declareCommands says what this tree can carry out. It is asked again
+// whenever the direction changes, because the pair of tree-walk commands it
+// answers to is one of the things the direction settles: both meanings of a
+// shifted arrow are bound to the key, and declaring one of them is what
+// decides which the key reaches (see core.CmdTrinketCollapseLeftOrEnclosing).
+func (t *TreeView) declareCommands() {
+	// The push that steps ON into the tree, and the one that steps back out:
+	// leftward and rightward swap where the tree reads right to left.
+	back, on := core.CmdTrinketCollapseLeftOrEnclosing, core.CmdTrinketExpandRightOrDescend
+	if core.ChromeMirrored(t) {
+		back, on = core.CmdTrinketCollapseRightOrEnclosing, core.CmdTrinketExpandLeftOrDescend
+	}
 	t.SetCommands(
 		core.CmdTrinketItemPrior, core.CmdTrinketItemUp,
 		core.CmdTrinketItemNext, core.CmdTrinketItemDown,
@@ -243,17 +262,21 @@ func NewTreeView() *TreeView {
 		// The classic arrow movement under its own name, which is what the
 		// SHIFTED arrows keep doing in an editable grid -- there the plain
 		// ones walk the edit-target column instead.
-		core.CmdTrinketCollapseOrEnclosing, core.CmdTrinketExpandOrDescend,
+		back, on,
 		// The header focus zones and the row editor: Tab walks between the
 		// header stops (and between the editor's columns), Escape backs out
 		// of whichever of them is up. Neither reaches the content switch,
 		// which has no case for either.
 		core.CmdFocusNext, core.CmdFocusPrior, core.CmdTrinketCancel,
 	)
-	t.Init(t) // Enable polymorphic focus handling
-	t.SetFocusPolicy(core.StrongFocus)
-	t.SetAccessibleRole(core.RoleTree)
-	return t
+}
+
+// DirectionChanged is core.DirectionObserver: the direction this tree reads
+// has moved, whether it was set here or on something above. Which of the
+// shifted arrows' two meanings the tree answers to is derived from it, so it
+// says what it can do again.
+func (t *TreeView) DirectionChanged() {
+	t.declareCommands()
 }
 
 // AddRootItem adds a root item to the tree.
@@ -336,35 +359,32 @@ func (t *TreeView) SetCurrentIndex(index int) {
 	// This is needed for keyboard navigation when the TreeView is inside
 	// a ScrollArea and the selected item moves outside the visible area.
 	// For mouse clicks, SetFocusWithoutScroll() prevents unwanted scrolling.
-	if index >= 0 {
+	if sp, ok := t.treeHostSpan(); ok && index >= 0 {
 		metrics := t.EffectiveCellMetrics()
+		cw := metrics.UnitsPerCellWidth
 		item := t.flatList[index]
-		level := item.Level()
 
-		// Calculate the item's content start position (one space before the expand indicator)
-		// For root items (level 0), start at X=0
-		contentStartCells := level*t.indentWidth + treeLeftPadCells
-		if contentStartCells > 0 {
-			contentStartCells-- // Show one space of indent
+		// What has to be in view is the row's own content: one column of
+		// indent still showing, then the expander and the caption behind
+		// it, measured along the run and placed where it is drawn.
+		at := core.Unit(item.Level()*t.indentWidth+treeLeftPadCells) * cw
+		if at > 0 {
+			at -= cw
+		}
+		w := 2*cw + t.MeasureText(t.CellRun(item.Text))
+		if room := sp.w - at; w > room {
+			w = room
 		}
 
-		// Calculate actual content width: expand indicator (2 chars) + text
-		expandIndicatorWidth := 2 // "▶ " or "▼ " or "  " (for leaves)
-		textWidth := len(item.Text)
-		actualContentCells := expandIndicatorWidth + textWidth
+		// The visual Y position of this item, after the internal scroll.
+		itemY := core.Unit(index-t.scrollOffset) * metrics.UnitsPerCellHeight
 
-		// Calculate the visual Y position of this item (after internal scrolling)
-		// This is where the item appears on screen, relative to the TreeView's bounds
-		visualRow := index - t.scrollOffset
-		itemY := core.Unit(visualRow) * metrics.UnitsPerCellHeight
-
-		itemRect := core.UnitRect{
-			X:      core.Unit(contentStartCells) * metrics.UnitsPerCellWidth,
+		t.ScrollRectIntoView(core.UnitRect{
+			X:      t.treeRunX(sp, at, w),
 			Y:      itemY,
-			Width:  core.Unit(actualContentCells) * metrics.UnitsPerCellWidth,
+			Width:  w,
 			Height: metrics.UnitsPerCellHeight,
-		}
-		t.ScrollRectIntoView(itemRect)
+		})
 	}
 
 	// Announce selection change for accessibility
@@ -386,6 +406,32 @@ func (t *TreeView) SetCurrentIndex(index int) {
 	if t.onCurrentChanged != nil && index >= 0 {
 		t.onCurrentChanged(t.flatList[index])
 	}
+}
+
+// collapseOrEnclosing closes an open item, or climbs to the one enclosing it:
+// a step BACK along the tree, whichever arrow asked for it.
+func (t *TreeView) collapseOrEnclosing(current *TreeItem) bool {
+	if current != nil {
+		if current.Expanded && !current.IsLeaf() {
+			t.CollapseItem(current)
+		} else if current.Parent != nil {
+			t.SetCurrentItem(current.Parent)
+		}
+	}
+	return true
+}
+
+// expandOrDescend opens a closed item, or steps into the one already open: a
+// step ON along the tree.
+func (t *TreeView) expandOrDescend(current *TreeItem) bool {
+	if current != nil {
+		if !current.Expanded && !current.IsLeaf() {
+			t.ExpandItem(current)
+		} else if current.Expanded && len(current.Children) > 0 {
+			t.SetCurrentItem(current.Children[0])
+		}
+	}
+	return true
 }
 
 // ExpandItem expands an item to show its children.
@@ -675,7 +721,6 @@ func (t *TreeView) Paint(p *core.Painter) {
 
 		item := t.flatList[itemIndex]
 		itemY := core.Unit(i) * metrics.UnitsPerCellHeight
-		level := item.Level()
 
 		// Determine style
 		var s style.CellStyle
@@ -708,46 +753,10 @@ func (t *TreeView) Paint(p *core.Painter) {
 			Height: metrics.UnitsPerCellHeight,
 		}, ' ', s)
 
-		// Calculate x position with indent (plus the left breathing pad)
-		x := core.Unit(level*t.indentWidth+treeLeftPadCells) * metrics.UnitsPerCellWidth
-
-		// Connector lines fill the indent space (never widen it).
-		if t.treeLines {
-			for ci, r := range t.treeLinePrefix(item) {
-				if r != ' ' {
-					t.drawTreeLineCell(p, core.Unit(ci+treeLeftPadCells)*metrics.UnitsPerCellWidth, itemY, r, s, metrics)
-				}
-			}
-		}
-
-		// Draw expand/collapse indicator
-		if !item.IsLeaf() {
-			if item.Expanded {
-				p.DrawCell(x, itemY, '▼', s)
-			} else {
-				p.DrawCell(x, itemY, '▸', s)
-			}
-		} else if t.treeLines {
-			p.DrawCell(x, itemY, '▪', s)
-		} else {
-			p.DrawCell(x, itemY, ' ', s)
-		}
-		x += metrics.UnitsPerCellWidth
-
-		// Draw icon if present
-		if item.Icon != nil && len(item.Icon.Cells) > 0 {
-			cell := item.Icon.Cells[0]
-			p.DrawCell(x, itemY, cell.Char, cell.Style)
-			x += metrics.UnitsPerCellWidth * 2
-		}
-
-		// Draw text using font-aware rendering
-		font := t.EffectiveFont()
-		availableWidth := bounds.Width - x
-		if availableWidth < 0 {
-			availableWidth = 0
-		}
-		p.DrawText(x, itemY, ellipsizeText(font, t.EffectiveCellMetrics(), item.Text, availableWidth), s, font)
+		// One tree cell across the row, beside the scrollbar's lane: the
+		// same apparatus the multi-column presentation draws in its host
+		// span, over a span the width of the content.
+		t.paintTreeCell(p, item, t.rowSpan(), itemY, s, s, metrics, t.EffectiveFont(), item.Text)
 	}
 
 	// Draw scrollbar if needed
@@ -771,14 +780,61 @@ func (t *TreeView) visibleCount() int {
 	return n
 }
 
+// treeHostSpan is the span the tree apparatus is drawn in: the key column's,
+// or - with the key hidden - the first visible data column's, and the whole
+// row in the single-column presentation. ok=false when the host has been
+// panned out of sight, where there is nothing of the tree to hit.
+func (t *TreeView) treeHostSpan() (colSpan, bool) {
+	if !t.multiColumn() {
+		return t.rowSpan(), true
+	}
+	lay := t.columnLayout()
+	host := t.treeHostColumn()
+	for _, sp := range lay.spans {
+		if sp.col == nil || (host != nil && sp.col == host) {
+			return sp, true
+		}
+	}
+	return colSpan{}, false
+}
+
+// rowSpan is the single-column presentation's one span: the whole row, less
+// the scrollbar's lane when there is a scrollbar, so a caption never runs
+// under the bar.
+func (t *TreeView) rowSpan() colSpan {
+	w := t.Bounds().Width
+	if len(t.flatList) > t.visibleCount() {
+		w -= t.EffectiveCellMetrics().UnitsPerCellWidth
+	}
+	if w < 0 {
+		w = 0
+	}
+	return colSpan{x: core.LeadingX(t, t.Bounds().Width, 0, w), w: w, divX: -1}
+}
+
+// laneX is the column the vertical scrollbar stands in: the TRAILING edge,
+// which is the near side of the screen where the tree reads right to left.
+// The column band starts on the other side of it (see columnLayout).
+func (t *TreeView) laneX() core.Unit {
+	w := t.Bounds().Width
+	lane := t.EffectiveCellMetrics().UnitsPerCellWidth
+	return core.LeadingX(t, w, w-lane, lane)
+}
+
+// onLane reports whether a tree-local x is in the scrollbar's column. The lane
+// is one column wherever it stands, so what puts a press on it is being IN the
+// column rather than past its near edge.
+func (t *TreeView) onLane(x core.Unit) bool {
+	at := t.laneX()
+	return x >= at && x < at+t.EffectiveCellMetrics().UnitsPerCellWidth
+}
+
 // scrollbarGeometry returns scrollbar dimensions and thumb position.
 // Returns: scrollbarX, thumbStart, thumbHeight, trackHeight (all in rows)
 func (t *TreeView) scrollbarGeometry(visibleCount int) (scrollbarX core.Unit, thumbStart, thumbHeight, trackHeight int) {
-	bounds := t.Bounds()
-	metrics := t.EffectiveCellMetrics()
 	totalItems := len(t.flatList)
 
-	scrollbarX = bounds.Width - metrics.UnitsPerCellWidth
+	scrollbarX = t.laneX()
 	trackHeight = visibleCount
 
 	if totalItems <= visibleCount {
@@ -855,7 +911,7 @@ func (t *TreeView) paintScrollbar(p *core.Painter, visibleCount int) {
 	scheme := t.GetScheme()
 	metrics := t.EffectiveCellMetrics()
 	trackStyle := scheme.GetScrollbar()
-	thumbStyle := scheme.GetScrollbarThumbState(t.scrollbarThumbHovered && p.Graphical())
+	thumbStyle := scheme.GetScrollbarThumbState(false, t.scrollbarThumbHovered && p.Graphical())
 
 	// Pixel surfaces: a single hairline stripe blended at 50%
 	// opacity behind, and one solid full-opacity rectangle for the
@@ -868,9 +924,8 @@ func (t *TreeView) paintScrollbar(p *core.Painter, visibleCount int) {
 		// No track stripe: the hairline reads as another column
 		// divider next to the real ones. The bare thumb is the bar.
 		_, thumbU, posU := t.scrollbarUnits(visibleCount)
-		laneX := t.Bounds().Width - metrics.UnitsPerCellWidth
 		p.FillRect(core.UnitRect{
-			X:      laneX + 1,
+			X:      t.laneX() + 1,
 			Y:      headerH + core.Unit(posU+0.5),
 			Width:  metrics.UnitsPerCellWidth - 2,
 			Height: core.Unit(thumbU + 0.5),
@@ -1007,34 +1062,34 @@ func (t *TreeView) HandleKeyPress(event core.KeyPressEvent) bool {
 		return t.OpenColumnChooser()
 
 	case core.CmdTrinketColumnLeft:
-		return t.moveEnterTargetColumn(-1)
+		return t.moveEnterTargetColumn(t.arrowStep(-1))
 
 	case core.CmdTrinketColumnRight:
-		return t.moveEnterTargetColumn(1)
+		return t.moveEnterTargetColumn(t.arrowStep(1))
 
-	// One body, two commands, and they are the same act: collapse_or_enclosing
-	// IS what a left arrow has always done here. They are separate names only
-	// because item_left is also the grid's column walk, which handleEditTargetKey
-	// took above -- so anything reaching here means the classic movement.
-	case core.CmdTrinketItemLeft, core.CmdTrinketCollapseOrEnclosing:
-		if current != nil {
-			if current.Expanded && !current.IsLeaf() {
-				t.CollapseItem(current)
-			} else if current.Parent != nil {
-				t.SetCurrentItem(current.Parent)
-			}
-		}
-		return true
+	// The named commands say the ACT, so they mean the same thing whichever
+	// way the tree reads. The arrows name a side of the screen, and a tree
+	// grows away from the edge it reads from -- so which of the two acts an
+	// arrow asks for is the direction's answer. item_left and item_right are
+	// also the grid's column walk, which handleEditTargetKey took above; what
+	// reaches here is the classic movement.
+	case core.CmdTrinketCollapseLeftOrEnclosing, core.CmdTrinketCollapseRightOrEnclosing:
+		return t.collapseOrEnclosing(current)
 
-	case core.CmdTrinketItemRight, core.CmdTrinketExpandOrDescend:
-		if current != nil {
-			if !current.Expanded && !current.IsLeaf() {
-				t.ExpandItem(current)
-			} else if current.Expanded && len(current.Children) > 0 {
-				t.SetCurrentItem(current.Children[0])
-			}
+	case core.CmdTrinketExpandLeftOrDescend, core.CmdTrinketExpandRightOrDescend:
+		return t.expandOrDescend(current)
+
+	case core.CmdTrinketItemLeft:
+		if core.ChromeMirrored(t) {
+			return t.expandOrDescend(current)
 		}
-		return true
+		return t.collapseOrEnclosing(current)
+
+	case core.CmdTrinketItemRight:
+		if core.ChromeMirrored(t) {
+			return t.collapseOrEnclosing(current)
+		}
+		return t.expandOrDescend(current)
 
 	case core.CmdTrinketBeg:
 		if len(t.flatList) > 0 {
@@ -1189,8 +1244,8 @@ func (t *TreeView) HandleMousePress(event core.MousePressEvent) bool {
 	contentY := event.Y - headerH
 
 	// Check if click is on scrollbar
-	scrollbarX, thumbStart, thumbHeight, _ := t.scrollbarGeometry(t.visibleCount())
-	if event.X >= scrollbarX && len(t.flatList) > t.visibleCount() {
+	_, thumbStart, thumbHeight, _ := t.scrollbarGeometry(t.visibleCount())
+	if t.onLane(event.X) && len(t.flatList) > t.visibleCount() {
 		clickedRow := int(contentY / metrics.UnitsPerCellHeight)
 
 		// Pixel surfaces anchor the drag to the grab point within
@@ -1245,9 +1300,9 @@ func (t *TreeView) HandleMousePress(event core.MousePressEvent) bool {
 		return true
 	}
 
-	// Click on tree content (before scrollbar)
-	if event.X >= scrollbarX {
-		return false // Click is past the content area
+	// Click on tree content (beside the scrollbar)
+	if t.onLane(event.X) {
+		return false // Click is in the lane, not the content area
 	}
 
 	// Calculate which item was clicked
@@ -1255,33 +1310,17 @@ func (t *TreeView) HandleMousePress(event core.MousePressEvent) bool {
 	clickedIndex := t.scrollOffset + clickedRow
 
 	// Only process if click is on a valid item
-	contentWidth := bounds.Width - metrics.UnitsPerCellWidth
-	if event.X >= 0 && event.X < contentWidth && contentY >= 0 && clickedIndex >= 0 && clickedIndex < len(t.flatList) {
+	if event.X >= 0 && event.X < bounds.Width && contentY >= 0 && clickedIndex >= 0 && clickedIndex < len(t.flatList) {
 		item := t.flatList[clickedIndex]
-		level := item.Level()
 
 		// Check if clicked on expand/collapse indicator. In the
 		// multi-column presentation the tree lives in its host span -
 		// the key column, or (key hidden) the first visible data
-		// column - which may be panned; offset accordingly.
-		keyX := core.Unit(0)
-		if t.multiColumn() {
-			lay := t.columnLayout()
-			host := t.treeHostColumn()
-			keyX = core.Unit(-1)
-			for _, sp := range lay.spans {
-				if sp.col == nil || (host != nil && sp.col == host) {
-					keyX = sp.x
-					break
-				}
-			}
-			if keyX < 0 {
-				keyX = contentWidth // no tree host in view: no indicator hit
-			}
-		}
-		indicatorX := keyX + core.Unit(level*t.indentWidth+treeLeftPadCells)*metrics.UnitsPerCellWidth
-		if event.X >= indicatorX && event.X < indicatorX+metrics.UnitsPerCellWidth {
-			if !item.IsLeaf() {
+		// column - which may be panned; the painter's own arithmetic
+		// says where the glyph ended up.
+		if sp, ok := t.treeHostSpan(); ok {
+			ix, iw := t.treeExpanderRect(sp, item)
+			if event.X >= ix && event.X < ix+iw && !item.IsLeaf() {
 				t.ToggleItem(item)
 				return true
 			}
@@ -1351,8 +1390,8 @@ func (t *TreeView) overScrollbarThumb(x, y core.Unit) bool {
 	if x < 0 || y < 0 || x >= bounds.Width || y >= bounds.Height {
 		return false
 	}
-	scrollbarX, thumbStart, thumbHeight, _ := t.scrollbarGeometry(visibleCount)
-	if x < scrollbarX {
+	_, thumbStart, thumbHeight, _ := t.scrollbarGeometry(visibleCount)
+	if !t.onLane(x) {
 		return false
 	}
 	contentY := y - t.headerHeight() // the track starts below the header
@@ -1547,8 +1586,9 @@ func (t *TreeView) HandleMouseWheel(event core.MouseWheelEvent) bool {
 		return false
 	}
 
-	// Horizontal wheel pans the column scroll region (scroll mode).
-	if event.DeltaX != 0 && t.scrollHorizontally(event.DeltaX*2) {
+	// Horizontal wheel pans the column scroll region (scroll mode). The wheel
+	// names a direction on the screen; the pan travels along the run.
+	if event.DeltaX != 0 && t.scrollHorizontally(t.panStep(core.Unit(event.DeltaX*2)*t.EffectiveCellMetrics().UnitsPerCellWidth)) {
 		core.ClaimWheelGesture(event, t.HandleMouseWheel)
 		return true
 	}

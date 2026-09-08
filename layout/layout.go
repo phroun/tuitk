@@ -200,10 +200,10 @@ func statedAlignment(w core.Trinket) (core.Alignment, bool) {
 // A cell surface draws by dividing units by the cell size and hit-tests in
 // units, so a track that is not a whole number of cells puts everything after
 // it between cells: it draws in one and answers the mouse in another. A
-// smooth surface has no such grid.
+// smooth surface has no such constraint.
 //
-// What is quantized is the distribution, so the tracks themselves land on the
-// grid. Rounding a child's origin afterwards without that would move it out of
+// What is quantized is the distribution, so the tracks themselves land on whole
+// cells. Rounding a child's origin afterwards without that would move it out of
 // the space the layout gave it and into its neighbour's; with it, the only
 // fraction of a cell left to round away is the one an alignment put inside a
 // child's own track (see placeChild).
@@ -238,7 +238,7 @@ func floorToQuantum(v, q core.Unit) core.Unit {
 	return v - r
 }
 
-// placeChild hands a child its bounds with its origin on the cell grid.
+// placeChild hands a child its bounds with its origin on a whole cell.
 //
 // Drawing divides units by the cell size and hit-testing does not, so a child
 // standing a fraction of a cell in draws in one cell and answers the mouse in
@@ -251,6 +251,26 @@ func placeChild(container core.Container, w core.Trinket, bounds core.UnitRect, 
 	bounds.X = floorToQuantum(bounds.X, cellQuantum(container, metrics.UnitsPerCellWidth))
 	bounds.Y = floorToQuantum(bounds.Y, cellQuantum(container, metrics.UnitsPerCellHeight))
 	w.SetBounds(bounds)
+}
+
+// mirrorX reflects a child's horizontal slot within the room its layout is
+// dividing, which is how a run laid out from the left reads from the right.
+//
+// The children keep their order and the sizes they were given: a child standing
+// d units in from the room's leading edge stands d units in from its trailing
+// one. Everything the main-axis pass settled reflects with it -- where justify
+// packed the run, which way a reversed flex walked its line, the column of air
+// an inline trinket keeps -- so each of those is stated against the direction
+// without being asked about it a second time.
+//
+// Reflection is the one thing in this package that SUBTRACTS a position, so a
+// room whose own trailing edge is not on a cell -- margins are units and need
+// not be whole cells -- reflects its children off the cells by that remainder.
+// What puts them back is placeChild, which floors every origin it is handed;
+// this is the operation that gives it something to do on the horizontal axis.
+func mirrorX(room, bounds core.UnitRect) core.UnitRect {
+	bounds.X = room.X*2 + room.Width - bounds.X - bounds.Width
+	return bounds
 }
 
 // quantizeSizes rounds each size to a whole number of q and keeps the total
@@ -291,7 +311,7 @@ func quantizeSizes(sizes []core.Unit, available, q core.Unit) {
 }
 
 // calculateStretch distributes available space among stretching items. Every
-// size it returns is a whole number of q where the surface has a cell grid
+// size it returns is a whole number of q where the surface places on cells
 // (see cellQuantum); q of 0 leaves them exactly as the arithmetic fell.
 func calculateStretch(available core.Unit, items []stretchItem, q core.Unit) []core.Unit {
 	if len(items) == 0 {

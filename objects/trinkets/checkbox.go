@@ -155,7 +155,7 @@ func (c *Checkbox) SizeHint() core.UnitSize {
 	// Indicator is decorative (3 cells), space is 1 cell, text is measured
 	indicatorWidth := metrics.UnitsPerCellWidth * 3 // "[ ]" = 3 cells
 	spaceWidth := metrics.UnitsPerCellWidth         // " " = 1 cell
-	textWidth := c.MeasureText(c.text)
+	textWidth := c.MeasureText(c.CellRun(c.text))
 	return core.UnitSize{
 		Width:  indicatorWidth + spaceWidth + textWidth,
 		Height: metrics.TextHeight(1),
@@ -228,25 +228,34 @@ func (c *Checkbox) Paint(p *core.Painter) {
 	case PartiallyChecked:
 		middle = '-'
 	}
-	p.DrawCell(0, 0, '[', indicatorStyle)
-	p.DrawCell(metrics.UnitsPerCellWidth, 0, middle, indicatorStyle)
-	p.DrawCell(metrics.UnitsPerCellWidth*2, 0, ']', indicatorStyle)
+	// The indicator sits on the LEADING edge with the caption running away
+	// from it, so a checkbox in a right-to-left form reads box-then-caption
+	// from the right. The three cells keep their order inside the group: the
+	// brackets are a pair, and a pair drawn backwards is "]x[".
+	box := c.Bounds().Width
+	indicatorWidth := metrics.UnitsPerCellWidth * 3
+	ind := core.LeadingX(c, box, 0, indicatorWidth)
+	p.DrawCell(ind, 0, '[', indicatorStyle)
+	p.DrawCell(ind+metrics.UnitsPerCellWidth, 0, middle, indicatorStyle)
+	p.DrawCell(ind+metrics.UnitsPerCellWidth*2, 0, ']', indicatorStyle)
 
 	// Draw space (decorative, 1 cell) and text (font-based)
-	p.DrawCell(metrics.UnitsPerCellWidth*3, 0, ' ', labelStyle) // Space after indicator
-	x := metrics.UnitsPerCellWidth * 4                          // After indicator + space (4 cells)
+	p.DrawCell(core.LeadingX(c, box, indicatorWidth, metrics.UnitsPerCellWidth), 0, ' ', labelStyle)
+	x := metrics.UnitsPerCellWidth * 4 // After indicator + space (4 cells)
 
 	if !c.wordWrap {
-		p.DrawText(x, 0, c.text, labelStyle, font)
+		run := c.CellRun(c.text)
+		p.DrawText(core.LeadingX(c, box, x, c.MeasureText(run)), 0, run, labelStyle, font)
 		return
 	}
 
 	// Word wrap: the indicator is chrome anchored to the top line;
 	// wrapped lines hang under the text column.
-	textWidth := c.Bounds().Width - x
+	textWidth := box - x
 	y := core.Unit(0)
 	for _, line := range wrapText(c.text, textWidth, font, metrics) {
-		p.DrawText(x, y, line, labelStyle, font)
+		run := c.CellRun(line)
+		p.DrawText(core.LeadingX(c, box, x, c.MeasureText(run)), y, run, labelStyle, font)
 		y += metrics.UnitsPerCellHeight
 	}
 }

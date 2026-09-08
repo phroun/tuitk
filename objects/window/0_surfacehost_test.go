@@ -172,14 +172,21 @@ type caretTrinket struct {
 func newCaretTrinket(style int, x, y core.Unit) *caretTrinket {
 	c := &caretTrinket{style: style, localX: x, localY: y}
 	c.TrinketBase = *core.NewTrinketBase()
+	c.Init(c) // so focus and the text-sink question reach this type
+	c.SetFocusPolicy(core.StrongFocus)
 	return c
 }
 
 func (c *caretTrinket) Paint(p *core.Painter) {
 	if c.focused {
-		p.RequestTextCaret(c.localX, c.localY, c.style)
+		p.RequestTextCaret(c.localX, c.localY, c.style, style.ColorDefault)
 	}
 }
+
+// A trinket that asks for the platform caret is a trinket that types: the
+// caret is where typing goes, and the surface withdraws it when what holds
+// focus does not.
+func (c *caretTrinket) AcceptsTextInput() bool { return true }
 
 // A focused trinket's caret request reaches the surface, translated into
 // surface coordinates, with its DECSCUSR shape.
@@ -188,6 +195,7 @@ func TestSurfaceHostAppliesTextCaret(t *testing.T) {
 	caret := newCaretTrinket(5, 24, 32)
 	caret.focused = true
 	win.SetContent(caret)
+	win.FocusManager().SetFocusedTrinket(caret)
 
 	surface := &fakeSurface{size: core.UnitSize{Width: 8 * 50, Height: 16 * 12}}
 	host := NewSurfaceHost(win, surface)
@@ -226,8 +234,8 @@ func TestSurfaceHostHidesCaretWithoutRequest(t *testing.T) {
 func TestTextCaretLastRequestWins(t *testing.T) {
 	p := core.NewPainter(nullPaintBackend{})
 	p.ResetTextCaretRequest()
-	p.RequestTextCaret(10, 10, 2) // content underneath
-	p.RequestTextCaret(40, 8, 5)  // overlay painted after it
+	p.RequestTextCaret(10, 10, 2, style.ColorDefault) // content underneath
+	p.RequestTextCaret(40, 8, 5, style.ColorDefault)  // overlay painted after it
 
 	got := p.TextCaretRequest()
 	if !got.Visible || got.X != 40 || got.Y != 8 || got.Style != 5 {
@@ -242,7 +250,7 @@ func TestTextCaretSurvivesPainterDerivation(t *testing.T) {
 	p.ResetTextCaretRequest()
 
 	child := p.WithTransform(core.NewTranslation(16, 48))
-	child.RequestTextCaret(8, 16, 3)
+	child.RequestTextCaret(8, 16, 3, style.ColorDefault)
 
 	got := p.TextCaretRequest()
 	if !got.Visible || got.X != 24 || got.Y != 64 {

@@ -119,9 +119,70 @@ func (a *app) wireMainWindow() {
 	ui.Object("tfmh").On("toggle", setMask(`echo=password mask="#"`))
 	ui.Object("tfmn").On("toggle", setMask(`echo=normal`))
 
+	// The direction marks, on the field beside the switch. They are an editing
+	// aid, so they appear while that field is focused and the plain text comes
+	// back when it is not.
+	tfbidi := ui.Object("tfbidi")
+	ui.Object("tfbidic").On("toggle", func(ev *protocol.Event) {
+		if ev.Flag("checked") == protocol.FlagTrue {
+			_ = tfbidi.Set("show_bidi_controls")
+			return
+		}
+		_ = tfbidi.Set("!show_bidi_controls")
+	})
+
 	a.wireDenomination(win)
 	a.wireLimits()
+	a.wireDirection()
 	a.wireTerminalTab(tabs)
+}
+
+// wireDirection turns the Grid and Flex tabs over.
+//
+// direction is inherited, so it goes on the panel holding the demonstrations
+// and reaches everything under it -- the bands of a grid, the run of a flex,
+// and every halign a child in them carries. The checkbox itself sits OUTSIDE
+// that panel, so the control stays where the reader left it while what it
+// controls turns over.
+func (a *app) wireDirection() {
+	ui := a.ui
+	turn := func(target client.Handle) func(protocol.FlagState) {
+		return func(s protocol.FlagState) {
+			if s == protocol.FlagTrue {
+				_ = target.Set("direction=rtl")
+				return
+			}
+			_ = target.Set("direction=ltr")
+		}
+	}
+	// Written out rather than looped: a name reached through a variable is a
+	// name the surfacing check cannot read, and an unsurfaced handle is id 0,
+	// which is quiet -- the switch would look wired and do nothing.
+	ui.Checkbox("grtl").OnToggle(turn(ui.Object("grc")))   // a grid's columns
+	ui.Checkbox("fxrtl").OnToggle(turn(ui.Object("fxc")))  // a flex's runs and lines
+	ui.Checkbox("sertl").OnToggle(turn(ui.Object("serc"))) // boxes, arrows, captions
+	ui.Checkbox("ssrtl").OnToggle(turn(ui.Object("ssc")))  // a scroll area's bars
+	ui.Checkbox("slrtl").OnToggle(turn(ui.Object("slc")))  // a splitter's panes
+	ui.Checkbox("pgrtl").OnToggle(turn(ui.Object("pgc")))  // which end a bar fills from
+	// The LIST rather than the pane it sits in: the tree beside it is a later
+	// project, and turning the pane over would turn that too.
+	ui.Checkbox("lirtl").OnToggle(turn(ui.Object("lilv")))
+	// The TREE rather than the box holding it, so the switches under it stay
+	// where the reader left them. The Tags column names its own direction and
+	// keeps it either way round.
+	ui.Checkbox("drtl").OnToggle(turn(ui.Object("dtree")))
+	// One switch for every tab strip in the demo, so all three kinds can be
+	// read against each other: the two side strips move to the other edge
+	// while the window's own strip and the bottom one run the other way.
+	// Written out rather than looped, for the reason above.
+	//
+	// The window's own strip HOLDS this switch, so turning it would turn the
+	// switch too. The checkbox names its own direction to stay put -- which is
+	// the other way a control keeps its place, and the one available when it
+	// cannot sit outside what it controls.
+	ui.Checkbox("vtrtl").OnToggle(turn(ui.Object("vtc")))
+	ui.Checkbox("vtrtl").OnToggle(turn(ui.Object("tabs")))
+	ui.Checkbox("vtrtl").OnToggle(turn(ui.Object("btabs")))
 }
 
 // wireLimits drives the Limits tab: the two bounds a trinket may carry, and
@@ -156,9 +217,9 @@ func (a *app) wireLimits() {
 	ui.Object("lmin0").On("toggle", set(mid, "min_width=0"))
 	ui.Object("lmin160").On("toggle", set(mid, "min_width=160"))
 
-	ui.Object("lhbegin").On("toggle", set(capped, "halign=textbegin"))
+	ui.Object("lhbegin").On("toggle", set(capped, "halign=textnatural"))
 	ui.Object("lhcenter").On("toggle", set(capped, "halign=center"))
-	ui.Object("lhend").On("toggle", set(capped, "halign=textend"))
+	ui.Object("lhend").On("toggle", set(capped, "halign=textopposite"))
 
 	// Filling is what the maximum interrupts, so it is worth turning off to
 	// see that the two arrive at the same placement.
@@ -585,14 +646,14 @@ func (a *app) wireDetails() {
 		if s == protocol.FlagTrue {
 			n = 2
 		}
-		_ = dtree.Set(fmt.Sprintf("fixed_left=%d", n))
+		_ = dtree.Set(fmt.Sprintf("fixed_begin=%d", n))
 	})
 	ui.Checkbox("dpinr").OnToggle(func(s protocol.FlagState) {
 		n := 0
 		if s == protocol.FlagTrue {
 			n = 1
 		}
-		_ = dtree.Set(fmt.Sprintf("fixed_right=%d", n))
+		_ = dtree.Set(fmt.Sprintf("fixed_end=%d", n))
 	})
 	ui.Checkbox("dledger").OnToggle(func(s protocol.FlagState) {
 		if s == protocol.FlagTrue {

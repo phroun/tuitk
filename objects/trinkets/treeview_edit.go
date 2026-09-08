@@ -56,7 +56,7 @@ func (t *TreeView) clickEditSlop() (dx, dy core.Unit) {
 // treeKeyColumn is the sentinel identifying the KEY (tree) column in
 // the edit ring. It never lives in t.columns and is never painted
 // from - only its pointer identity matters.
-var treeKeyColumn = &TreeColumn{Align: "left"}
+var treeKeyColumn = &TreeColumn{Align: core.AlignLayoutNatural}
 
 // SetEditable makes the KEY (tree) column editable in the row editor,
 // exactly like a data column's Editable trait (the editor writes the
@@ -114,9 +114,10 @@ func (t *TreeView) setCellValue(item *TreeItem, col *TreeColumn, v string) {
 	item.SetValue(col.ID, v)
 }
 
-// treeCellTextInset is where the caption text begins within a
-// tree-hosting cell: the indent, the expander cell, and the icon
-// (when the item has one) - mirroring paintTreeCell exactly.
+// treeCellTextInset is how far into a tree-hosting cell the caption text
+// begins, measured along the run: the indent, the expander cell, and the icon
+// (when the item has one) - mirroring paintTreeCell exactly. Where that lands
+// in the span is treeRunX's answer.
 func (t *TreeView) treeCellTextInset(item *TreeItem) core.Unit {
 	cw := t.EffectiveCellMetrics().UnitsPerCellWidth
 	inset := core.Unit(item.Level()*t.indentWidth+1+treeLeftPadCells) * cw
@@ -248,6 +249,9 @@ func (t *TreeView) mountEditor(col *TreeColumn) {
 		cb := NewComboBox()
 		cb.SetCellMetrics(&cm)
 		cb.SetFont(font)
+		// The editor reads the way the cell it stands in does, so the
+		// value and the arrow keep the places they had a moment ago.
+		cb.SetDirection(t.colDirection(col))
 		// Borrowed ancestry: the popup controller walk and the
 		// drop-down's screen geometry (drop direction, scrolling)
 		// resolve through the tree at the live cell origin - the
@@ -291,6 +295,7 @@ func (t *TreeView) mountEditor(col *TreeColumn) {
 		ed := NewTextInput()
 		ed.SetCellMetrics(&cm)
 		ed.SetFont(font)
+		ed.SetDirection(t.colDirection(col))
 		ed.SetText(raw)
 		ed.SelectAll()
 		ed.SetFocus()
@@ -299,7 +304,30 @@ func (t *TreeView) mountEditor(col *TreeColumn) {
 		t.editBox = ed
 	}
 	t.ensureEditColVisible()
+	t.syncEditorBounds()
 	t.Update()
+}
+
+// syncEditorBounds gives the mounted editor the size of the cell it stands in.
+//
+// Painting was the only thing that did this, so an editor asked about its own
+// size before the first frame after it was mounted answered with whatever the
+// last one left -- nothing at all, for one just built. A choice cell opens its
+// drop-down the moment it is mounted, and a drop-down is measured against the
+// box it drops from; the column it stands in has just been scrolled into view
+// by then, so the answer has to be the cell's CURRENT size and not a stale one.
+func (t *TreeView) syncEditorBounds() {
+	r, ok := t.editorRect()
+	if !ok {
+		return
+	}
+	size := core.UnitRect{Width: r.Width, Height: r.Height}
+	switch {
+	case t.editBox != nil:
+		t.editBox.SetBounds(size)
+	case t.editCombo != nil:
+		t.editCombo.SetBounds(size)
+	}
 }
 
 // dropEditorTrinkets dismisses whichever editor trinket is mounted.
@@ -331,13 +359,12 @@ func (t *TreeView) ensureEditColVisible() {
 // needed to reveal col (scroll mode only). Same conservative rule as
 // the ScrollArea's EnsureRectVisible: no movement at all when the
 // cell is already fully in view; otherwise align the nearer edge,
-// prioritizing (never hiding) the left edge.
+// prioritizing (never hiding) the edge the column begins at.
 func (t *TreeView) ensureColVisible(col *TreeColumn) {
 	if t.fitWidth || col == nil {
 		return
 	}
 	lay := t.columnLayout()
-	cw := t.EffectiveCellMetrics().UnitsPerCellWidth
 	for _, sp := range lay.spans {
 		if !spanMatchesCol(sp, col) {
 			continue
@@ -345,19 +372,18 @@ func (t *TreeView) ensureColVisible(col *TreeColumn) {
 		if sp.fixed {
 			return // pinned columns are always in view
 		}
-		// The span's NATURAL cell offset within the scrolling region
-		// (its painted x has the current scroll already applied).
-		leftCells := int(lay.scrollL / cw)
-		viewCells := int((lay.scrollR - lay.scrollL) / cw)
-		start := int(sp.x/cw) - leftCells + t.hScroll
-		end := start + int(sp.w/cw)
+		// The span's NATURAL offset within the scrolling region (its
+		// painted x has the current scroll already applied).
+		view := lay.scrollR - lay.scrollL
+		start := lay.runOffset(t, sp) + t.hScroll
+		end := start + sp.w
 		hs := t.hScroll
 		if start < hs {
 			hs = start
-		} else if end > hs+viewCells {
-			hs = end - viewCells
+		} else if end > hs+view {
+			hs = end - view
 			if hs > start {
-				hs = start // never hide the left edge
+				hs = start // never hide where the column begins
 			}
 		}
 		if hs < 0 {
@@ -485,16 +511,18 @@ func (t *TreeView) stepEditRow(delta int) {
 // arrows belong to this; expand/collapse keeps Shift+Left/Right,
 // +/-, Space, and the mouse. Returns handled.
 //
-// The shifted arrows are simply a different COMMAND now
-// (trinket_collapse_or_enclosing / trinket_expand_or_descend), which is what
-// this used to decide by reading the Shift bit out of the event.
+// The shifted arrows arrive as their own COMMAND, one naming the side of the
+// push (trinket_collapse_left_or_enclosing and its three companions), so
+// nothing here reads the Shift bit out of the event.
 func (t *TreeView) handleEditTargetKey(cmd string) bool {
+	// The edit ring is in the columns' own order, so an arrow walks it the
+	// way it points on the screen.
 	delta := 0
 	switch cmd {
 	case core.CmdTrinketItemLeft:
-		delta = -1
+		delta = t.arrowStep(-1)
 	case core.CmdTrinketItemRight:
-		delta = 1
+		delta = t.arrowStep(1)
 	default:
 		return false
 	}
@@ -625,14 +653,17 @@ func (t *TreeView) editorRect() (core.UnitRect, bool) {
 		// starts - past the indent, expander, and icon - so it lines
 		// up with the value it replaces.
 		if sp.col == nil || (host != nil && sp.col == host) {
-			if textX := sp.x + t.treeCellTextInset(t.editItem); textX > r.X {
-				d := textX - r.X
-				if d >= r.Width {
-					return core.UnitRect{}, false // fully in the apparatus clip
-				}
-				r.X += d
-				r.Width -= d
+			inset := t.treeCellTextInset(t.editItem)
+			w := sp.w - inset
+			if w <= 0 {
+				return core.UnitRect{}, false // no room past the apparatus
 			}
+			x0 := max(t.treeRunX(sp, inset, w), r.X)
+			x1 := min(t.treeRunX(sp, inset, w)+w, r.X+r.Width)
+			if x1 <= x0 {
+				return core.UnitRect{}, false // fully in the apparatus clip
+			}
+			r.X, r.Width = x0, x1-x0
 		}
 		return r, true
 	}
@@ -649,12 +680,11 @@ func (t *TreeView) paintRowEditor(p *core.Painter) {
 	if !ok {
 		return
 	}
+	t.syncEditorBounds()
 	switch {
 	case t.editBox != nil:
-		t.editBox.SetBounds(core.UnitRect{Width: r.Width, Height: r.Height})
 		t.editBox.Paint(p.WithOffset(r.X, r.Y))
 	case t.editCombo != nil:
-		t.editCombo.SetBounds(core.UnitRect{Width: r.Width, Height: r.Height})
 		t.editCombo.Paint(p.WithOffset(r.X, r.Y))
 	}
 }
@@ -741,10 +771,10 @@ func (t *TreeView) handleEditMouseRelease(event core.MouseReleaseEvent) bool {
 // disagree.
 func (t *TreeView) treeCellEditZone(sp colSpan, item *TreeItem) (x0, w core.Unit) {
 	metrics := t.EffectiveCellMetrics()
-	textX := sp.x + t.treeCellTextInset(item)
-	avail := sp.x + sp.w - textX
+	inset := t.treeCellTextInset(item)
+	avail := sp.w - inset
 	if avail <= 0 {
-		return textX, 0
+		return t.treeRunX(sp, inset, 0), 0
 	}
 	text := item.Text
 	if sp.col != nil {
@@ -759,7 +789,7 @@ func (t *TreeView) treeCellEditZone(sp colSpan, item *TreeItem) (x0, w core.Unit
 	if zone > avail {
 		zone = avail
 	}
-	return textX, zone
+	return t.treeRunX(sp, inset, zone), zone
 }
 
 // editableColumnAt resolves which editable column the point x (in a
